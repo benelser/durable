@@ -1,0 +1,47 @@
+# Build artifacts
+/target/
+**/__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Claude Code local config
+.claude/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Runtime data
+*.ndjson
+*.wal
+/data/
+demo-data/
+order-agent-data/
+durable-data/
+
+# Secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.p12
+*.key
+*.jks
+*.pfx
+credentials.json
+aws-credentials
+
+# Reference / research repos (not part of Durable)
+/source/
+
+# Test artifacts
+.pytest_cache/
+htmlcov/
+.coverage

@@ -1,0 +1,29 @@
+[package]
+name = "durable-runtime"
+version = "0.1.0"
+edition = "2021"
+description = "The SQLite of durable agent execution — crash-recoverable AI agents with exactly-once semantics. Zero dependencies."
+license = "MIT"
+readme = "README.md"
+keywords = ["agent", "durable", "llm", "execution", "replay"]
+categories = ["development-tools", "asynchronous"]
+
+[[bin]]
+name = "durable-runtime"
+path = "src/bin/durable_runtime.rs"
+
+[dependencies]
+
+[dev-dependencies]
+
+[[example]]
+name = "echo_agent"
+path = "examples/echo_agent.rs"
+
+[[example]]
+name = "tool_agent"
+path = "examples/tool_agent.rs"
+
+[[example]]
+name = "crash_recovery"
+path = "examples/crash_recovery.rs"
