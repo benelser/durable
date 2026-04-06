@@ -517,23 +517,36 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
                             .map(ExecutionId::from_uuid)
                     });
 
-                let outcome = match exec_id {
-                    Some(id) => rt.start_with_id(id, input),
-                    None => rt.start(input),
+                // Always use start_with_id so we know the execution_id for the response.
+                // If the execution already exists (re-run with same ID), resume instead.
+                let run_id = exec_id.unwrap_or_else(ExecutionId::new);
+                let run_id_str = run_id.to_string();
+                let outcome = match rt.start_with_id(run_id, input) {
+                    AgentOutcome::Error { .. } if exec_id.is_some() => {
+                        // Execution already exists — resume it for memoized replay
+                        rt.resume(run_id)
+                    }
+                    other => other,
                 };
 
                 match outcome {
                     AgentOutcome::Complete { response } => {
                         writer.send_event(
                             "completed",
-                            vec![("response", json::json_str(&response))],
+                            vec![
+                                ("response", json::json_str(&response)),
+                                ("execution_id", json::json_str(&run_id_str)),
+                            ],
                         );
                     }
                     AgentOutcome::Suspended { reason } => {
                         let reason_json = reason.to_json();
                         writer.send_event(
                             "suspended",
-                            vec![("reason", reason_json)],
+                            vec![
+                                ("reason", reason_json),
+                                ("execution_id", json::json_str(&run_id_str)),
+                            ],
                         );
                     }
                     AgentOutcome::MaxIterations { last_response } => {
@@ -541,6 +554,7 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
                             "completed",
                             vec![
                                 ("response", json::json_str(&last_response)),
+                                ("execution_id", json::json_str(&run_id_str)),
                                 ("max_iterations", json::json_bool(true)),
                             ],
                         );
@@ -550,6 +564,7 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
                             "error",
                             vec![
                                 ("message", json::json_str(&error.to_string())),
+                                ("execution_id", json::json_str(&run_id_str)),
                                 ("retryable", json::json_bool(false)),
                             ],
                         );
@@ -584,30 +599,43 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
                     }
                 };
 
+                let resume_id_str = exec_id_str.to_string();
                 let outcome = rt.resume(exec_id);
                 match outcome {
                     AgentOutcome::Complete { response } => {
                         writer.send_event(
                             "completed",
-                            vec![("response", json::json_str(&response))],
+                            vec![
+                                ("response", json::json_str(&response)),
+                                ("execution_id", json::json_str(&resume_id_str)),
+                            ],
                         );
                     }
                     AgentOutcome::Suspended { reason } => {
                         writer.send_event(
                             "suspended",
-                            vec![("reason", reason.to_json())],
+                            vec![
+                                ("reason", reason.to_json()),
+                                ("execution_id", json::json_str(&resume_id_str)),
+                            ],
                         );
                     }
                     AgentOutcome::Error { error } => {
                         writer.send_event(
                             "error",
-                            vec![("message", json::json_str(&error.to_string()))],
+                            vec![
+                                ("message", json::json_str(&error.to_string())),
+                                ("execution_id", json::json_str(&resume_id_str)),
+                            ],
                         );
                     }
                     AgentOutcome::MaxIterations { last_response } => {
                         writer.send_event(
                             "completed",
-                            vec![("response", json::json_str(&last_response))],
+                            vec![
+                                ("response", json::json_str(&last_response)),
+                                ("execution_id", json::json_str(&resume_id_str)),
+                            ],
                         );
                     }
                 }
