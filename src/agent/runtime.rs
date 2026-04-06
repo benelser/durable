@@ -263,11 +263,36 @@ impl AgentRuntime {
             return AgentOutcome::Error { error: e };
         }
 
-        // Reconstruct conversation from event store (single source of truth)
+        // Start with a fresh conversation — the run_loop will replay through
+        // cached steps and rebuild the conversation naturally. This avoids
+        // duplicate messages from both reconstruct_conversation and the loop.
+        //
+        // We need the original user input. Extract it from the first user message
+        // in the event log's LLM call params.
         let mut conversation = Conversation::with_system_prompt(&self.config.system_prompt);
-        match self.reconstruct_conversation(&replay_ctx, &mut conversation) {
-            Ok(()) => {}
-            Err(e) => return AgentOutcome::Error { error: e },
+
+        // Get the original user input from the first step's params
+        let state = replay_ctx.current_state().unwrap_or_else(|_| {
+            crate::storage::event::ExecutionState::from_events(exec_id, &[])
+        });
+        // The first step is llm_call whose params contain the conversation JSON.
+        // Extract the user message from it.
+        if let Some(snapshots) = state.step_results_by_name.get("llm_call") {
+            if let Some(first) = snapshots.first() {
+                if let Ok(params_val) = json::parse(&first.params) {
+                    // params is the conversation JSON array
+                    if let Some(arr) = params_val.as_array() {
+                        for msg in arr {
+                            if msg.get("role").and_then(|v| v.as_str()) == Some("user") {
+                                if let Some(content) = msg.get("content").and_then(|v| v.as_str()) {
+                                    conversation.push(Message::user(content));
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         self.run_loop(&ctx, &replay_ctx, &mut conversation)
