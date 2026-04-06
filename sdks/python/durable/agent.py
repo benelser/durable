@@ -50,6 +50,8 @@ class Agent:
         system_prompt: str = "You are a helpful assistant.",
         model: Optional[str] = None,
         max_iterations: int = 50,
+        runtime: Optional[Any] = None,
+        agent_id: Optional[str] = None,
     ) -> None:
         self._data_dir = str(Path(data_dir).resolve())
         self._system_prompt = system_prompt
@@ -61,7 +63,15 @@ class Agent:
         self._budget: Optional[Budget] = None
         self._llm_handler: Optional[Callable] = None
 
-        self._runtime = RuntimeManager()
+        # Shared runtime support: if provided, share the subprocess
+        self._shared_runtime = runtime
+        self._agent_id: str = agent_id or ""
+
+        if runtime is None:
+            self._runtime = RuntimeManager()
+        else:
+            self._runtime = None  # type: ignore[assignment]
+
         self._protocol: Optional[ProtocolClient] = None
         self._started = False
 
@@ -144,17 +154,30 @@ class Agent:
         if self._protocol and self._started:
             return self._protocol
 
-        # Start the Rust binary
-        process = self._runtime.start()
-        self._protocol = ProtocolClient(process)
+        if self._shared_runtime is not None:
+            # Shared runtime: use its protocol client
+            self._protocol = self._shared_runtime._ensure_protocol()
+            if not self._agent_id:
+                import uuid as _uuid
+                self._agent_id = str(_uuid.uuid4())
+        else:
+            # Standalone: start own Rust binary
+            process = self._runtime.start()
+            self._protocol = ProtocolClient(process)
+            self._protocol.start()
 
         # Register callback handlers
-        self._protocol.register_callback("execute_tool", self._handle_tool_callback)
-        self._protocol.register_callback("chat_request", self._handle_llm_callback)
-        self._protocol.register_callback("check_contract", self._handle_contract_callback)
-
-        # Start the reader thread
-        self._protocol.start()
+        if self._agent_id:
+            # Per-agent callbacks (multiplexed runtime)
+            self._protocol.register_agent_buffer(self._agent_id)
+            self._protocol.register_agent_callback(self._agent_id, "execute_tool", self._handle_tool_callback)
+            self._protocol.register_agent_callback(self._agent_id, "chat_request", self._handle_llm_callback)
+            self._protocol.register_agent_callback(self._agent_id, "check_contract", self._handle_contract_callback)
+        else:
+            # Global callbacks (standalone mode)
+            self._protocol.register_callback("execute_tool", self._handle_tool_callback)
+            self._protocol.register_callback("chat_request", self._handle_llm_callback)
+            self._protocol.register_callback("check_contract", self._handle_contract_callback)
 
         # Send create_agent command
         config: dict = {
@@ -166,17 +189,26 @@ class Agent:
 
         tools = [d.to_dict() for d in self._tool_definitions]
 
-        self._protocol.send_fire_and_forget(
-            "create_agent",
-            data_dir=self._data_dir,
-            config=config,
-            tools=tools,
-            budget=self._budget.to_dict() if self._budget else None,
-            contracts=[c.name for c in self._contracts],
-        )
+        create_kwargs: Dict[str, Any] = {
+            "data_dir": self._data_dir,
+            "config": config,
+            "tools": tools,
+            "budget": self._budget.to_dict() if self._budget else None,
+            "contracts": [c.name for c in self._contracts],
+        }
+        if self._agent_id:
+            create_kwargs["agent_id"] = self._agent_id
+
+        self._protocol.send_fire_and_forget("create_agent", **create_kwargs)
 
         # Wait for agent_created or error
-        response = self._protocol.wait_for_event("agent_created", "error", timeout=10)
+        if self._agent_id:
+            response = self._protocol.wait_for_agent_event(
+                self._agent_id, "agent_created", "error", timeout=10
+            )
+        else:
+            response = self._protocol.wait_for_event("agent_created", "error", timeout=10)
+
         if response.get("type") == "error":
             raise DurableError(response.get("message", "failed to create agent"))
 
@@ -184,10 +216,15 @@ class Agent:
         return self._protocol
 
     def close(self) -> None:
-        """Shut down the runtime subprocess."""
+        """Shut down the runtime subprocess (standalone mode only)."""
+        if self._shared_runtime is not None:
+            # Shared runtime — don't kill the subprocess
+            self._started = False
+            return
         if self._protocol:
             self._protocol.stop()
-        self._runtime.stop()
+        if self._runtime:
+            self._runtime.stop()
         self._started = False
         self._protocol = None
 
@@ -207,11 +244,18 @@ class Agent:
         kwargs: Dict[str, Any] = {"input": prompt}
         if execution_id:
             kwargs["execution_id"] = execution_id
+        if self._agent_id:
+            kwargs["agent_id"] = self._agent_id
 
         protocol.send_fire_and_forget("run_agent", **kwargs)
 
-        # Collect events until completion
-        for event in protocol.collect_stream("completed", "suspended", "error"):
+        # Collect events until completion (per-agent or global)
+        if self._agent_id:
+            stream = protocol.collect_agent_stream(self._agent_id, "completed", "suspended", "error")
+        else:
+            stream = protocol.collect_stream("completed", "suspended", "error")
+
+        for event in stream:
             event_type = event.get("type", "")
 
             if event_type == "completed":
@@ -262,9 +306,18 @@ class Agent:
     def resume(self, execution_id: str) -> AgentResponse:
         """Resume a suspended execution."""
         protocol = self._ensure_started()
-        protocol.send_fire_and_forget("resume_agent", execution_id=execution_id)
 
-        for event in protocol.collect_stream("completed", "suspended", "error"):
+        resume_kwargs: Dict[str, Any] = {"execution_id": execution_id}
+        if self._agent_id:
+            resume_kwargs["agent_id"] = self._agent_id
+        protocol.send_fire_and_forget("resume_agent", **resume_kwargs)
+
+        if self._agent_id:
+            stream = protocol.collect_agent_stream(self._agent_id, "completed", "suspended", "error")
+        else:
+            stream = protocol.collect_stream("completed", "suspended", "error")
+
+        for event in stream:
             event_type = event.get("type", "")
             if event_type == "completed":
                 return AgentResponse(

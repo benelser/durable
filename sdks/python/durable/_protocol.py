@@ -41,9 +41,11 @@ class ProtocolClient:
     def __init__(self, process: subprocess.Popen) -> None:
         self._process = process
         self._callbacks: Dict[str, Callable] = {}
+        self._agent_callbacks: Dict[str, Dict[str, Callable]] = {}  # agent_id -> {msg_type -> handler}
         self._pending: Dict[str, threading.Event] = {}
         self._responses: Dict[str, dict] = {}
         self._events: list = []
+        self._agent_events: Dict[str, list] = {}  # agent_id -> event list
         self._event_lock = threading.Lock()
         self._lock = threading.Lock()
         self._reader_thread: Optional[threading.Thread] = None
@@ -67,8 +69,20 @@ class ProtocolClient:
             self._reader_thread = None
 
     def register_callback(self, msg_type: str, handler: Callable) -> None:
-        """Register a handler for a callback message type (e.g., execute_tool)."""
+        """Register a global handler for a callback message type."""
         self._callbacks[msg_type] = handler
+
+    def register_agent_callback(self, agent_id: str, msg_type: str, handler: Callable) -> None:
+        """Register a per-agent callback handler."""
+        if agent_id not in self._agent_callbacks:
+            self._agent_callbacks[agent_id] = {}
+        self._agent_callbacks[agent_id][msg_type] = handler
+
+    def register_agent_buffer(self, agent_id: str) -> None:
+        """Create a per-agent event buffer for demultiplexing."""
+        with self._event_lock:
+            if agent_id not in self._agent_events:
+                self._agent_events[agent_id] = []
 
     def send_command(self, msg_type: str, **payload: Any) -> dict:
         """Send a command and wait for the correlated response."""
@@ -144,6 +158,43 @@ class ProtocolClient:
         self._check_crashed()
         raise TimeoutError(f"stream did not end within {timeout}s")
 
+    def collect_agent_stream(self, agent_id: str, *end_types: str, timeout: float = 300) -> Iterator[dict]:
+        """Yield events for a specific agent until one of the end types is received."""
+        import time
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            self._check_crashed()
+            with self._event_lock:
+                buf = self._agent_events.get(agent_id)
+                if buf:
+                    event = buf.pop(0)
+                    yield event
+                    if event.get("type") in end_types:
+                        return
+                    continue
+            time.sleep(0.005)
+
+        self._check_crashed()
+        raise TimeoutError(f"agent {agent_id} stream did not end within {timeout}s")
+
+    def wait_for_agent_event(self, agent_id: str, *event_types: str, timeout: float = 300) -> dict:
+        """Wait for a specific event type for a specific agent."""
+        import time
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            self._check_crashed()
+            with self._event_lock:
+                buf = self._agent_events.get(agent_id, [])
+                for i, event in enumerate(buf):
+                    if event.get("type") in event_types:
+                        return buf.pop(i)
+            time.sleep(0.01)
+
+        self._check_crashed()
+        raise TimeoutError(f"no event of type {event_types} for agent {agent_id} within {timeout}s")
+
     def _check_crashed(self) -> None:
         """Raise RuntimeCrashed if the binary has exited."""
         if self._crashed:
@@ -194,8 +245,15 @@ class ProtocolClient:
                 callback_id = data.get("callback_id", "")
 
                 # Check if this is a callback (runtime asking SDK to do something)
-                if msg_type in self._callbacks:
-                    handler = self._callbacks[msg_type]
+                # Try per-agent callback first, then global
+                agent_id = data.get("agent_id", "")
+                handler = None
+                if agent_id and agent_id in self._agent_callbacks:
+                    handler = self._agent_callbacks[agent_id].get(msg_type)
+                if handler is None:
+                    handler = self._callbacks.get(msg_type)
+
+                if handler is not None:
                     cb_id = callback_id or msg_id
                     threading.Thread(
                         target=self._dispatch_callback,
@@ -211,9 +269,12 @@ class ProtocolClient:
                         self._pending[msg_id].set()
                         continue
 
-                # Otherwise, it's an event — buffer it
+                # Otherwise, it's an event — route to per-agent buffer or global
                 with self._event_lock:
-                    self._events.append(data)
+                    if agent_id and agent_id in self._agent_events:
+                        self._agent_events[agent_id].append(data)
+                    else:
+                        self._events.append(data)
 
             except (json.JSONDecodeError, ValueError, UnicodeDecodeError):
                 continue

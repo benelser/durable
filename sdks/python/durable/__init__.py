@@ -19,6 +19,7 @@ Quick start::
 
 from .agent import Agent
 from .budget import Budget
+from .runtime import Runtime
 from .contract import Contract
 from .errors import (
     BudgetExhausted,
@@ -39,6 +40,7 @@ __version__ = "0.1.0"
 __all__ = [
     # Core
     "Agent",
+    "Runtime",
     "tool",
     "Budget",
     "Contract",

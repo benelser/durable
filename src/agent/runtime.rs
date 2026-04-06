@@ -201,6 +201,11 @@ impl AgentRuntime {
         &self.event_store
     }
 
+    /// Get the CRUD storage backend.
+    pub fn storage(&self) -> &Arc<dyn ExecutionLog> {
+        &self.storage
+    }
+
     /// Get an inspector for querying execution state.
     pub fn inspector(&self) -> crate::observe::ExecutionInspector {
         crate::observe::ExecutionInspector::new(self.storage.clone())

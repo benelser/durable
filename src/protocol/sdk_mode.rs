@@ -5,9 +5,10 @@
 //! protocol callbacks. All durable state (events, memoization, crash recovery)
 //! stays in the Rust binary.
 //!
-//! This enables first-class SDKs in any language: Python spawns this binary,
-//! sends `create_agent`/`run_agent` commands, receives `completed`/`suspended`
-//! events, and handles `execute_tool`/`chat_request` callbacks.
+//! Multiplexed: one process handles N agents. Each `create_agent` registers an
+//! agent in the registry. `run_agent` spawns a thread — the command loop never
+//! blocks. Suspended agents cost zero threads; a background event loop watches
+//! for signals and auto-resumes.
 
 use crate::agent::llm::{LlmClient, LlmRequest, LlmResponse};
 use crate::agent::runtime::{AgentConfig, AgentOutcome, AgentRuntime};
@@ -42,29 +43,21 @@ impl StdoutWriter {
         let mut entries = vec![("type", json::json_str(msg_type))];
         entries.extend(fields);
         let payload_val = json::json_object(entries);
-        // Wrap in envelope
         let env = Envelope {
             version: crate::protocol::PROTOCOL_VERSION.to_string(),
             id: Uuid::new_v4().to_hyphenated(),
             timestamp: crate::core::time::now_millis(),
             payload: ProtocolMessage::TextResponse {
                 content: String::new(),
-            }, // placeholder
+            },
         };
-        // Write the raw JSON (bypassing ProtocolMessage enum for new message types)
         let mut obj = payload_val
             .as_object()
             .cloned()
             .unwrap_or_else(BTreeMap::new);
-        obj.insert(
-            "v".to_string(),
-            json::json_str(&env.version),
-        );
+        obj.insert("v".to_string(), json::json_str(&env.version));
         obj.insert("id".to_string(), json::json_str(&env.id));
-        obj.insert(
-            "ts".to_string(),
-            json::json_num(env.timestamp as f64),
-        );
+        obj.insert("ts".to_string(), json::json_num(env.timestamp as f64));
         let line = format!("{}\n", json::to_string(&Value::Object(obj)));
         let mut out = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let _ = out.write_all(line.as_bytes());
@@ -78,9 +71,7 @@ impl StdoutWriter {
 /// - Callback responses (tool_result, chat_response) → per-request channels
 /// - Commands (run_agent, etc.) → command channel for the main loop
 pub(crate) struct StdinReader {
-    /// Per-request response channels keyed by correlation ID.
     waiters: Mutex<BTreeMap<String, std::sync::mpsc::Sender<Value>>>,
-    /// Channel for commands (messages that aren't callback responses).
     command_tx: std::sync::mpsc::Sender<Value>,
     command_rx: Mutex<std::sync::mpsc::Receiver<Value>>,
 }
@@ -94,7 +85,6 @@ impl StdinReader {
             command_rx: Mutex::new(cmd_rx),
         });
 
-        // Spawn dedicated stdin reader thread
         let reader_clone = reader.clone();
         let handle = std::thread::spawn(move || {
             let stdin = io::stdin();
@@ -104,7 +94,7 @@ impl StdinReader {
             loop {
                 line.clear();
                 match buf_reader.read_line(&mut line) {
-                    Ok(0) => break, // EOF
+                    Ok(0) => break,
                     Ok(_) => {
                         let trimmed = line.trim();
                         if trimmed.is_empty() {
@@ -126,14 +116,12 @@ impl StdinReader {
         (reader, handle)
     }
 
-    /// Route an incoming message to the right destination.
     fn dispatch(&self, val: Value) {
         let msg_type = val
             .get("type")
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
-        // Callback responses go to their waiting thread
         let callback_id = val
             .get("callback_id")
             .or_else(|| val.get("id"))
@@ -154,12 +142,9 @@ impl StdinReader {
             }
         }
 
-        // Everything else is a command
         let _ = self.command_tx.send(val);
     }
 
-    /// Wait for a response with the given correlation ID.
-    /// Non-blocking for other threads — only this thread blocks on its channel.
     fn wait_for_response(&self, correlation_id: &str) -> Result<Value, String> {
         let (tx, rx) = std::sync::mpsc::channel();
 
@@ -168,12 +153,10 @@ impl StdinReader {
             waiters.insert(correlation_id.to_string(), tx);
         }
 
-        // Wait with timeout (5 minutes for LLM calls)
         rx.recv_timeout(std::time::Duration::from_secs(300))
             .map_err(|e| format!("callback timeout for {}: {}", correlation_id, e))
     }
 
-    /// Receive the next command from the command channel.
     fn recv_command(&self) -> Option<Value> {
         let rx = self.command_rx.lock().unwrap_or_else(|e| e.into_inner());
         rx.recv().ok()
@@ -184,15 +167,15 @@ impl StdinReader {
 // SdkLlmClient — implements LlmClient by calling back to the SDK
 // ---------------------------------------------------------------------------
 
-/// LLM client that sends chat requests to the parent SDK via protocol.
 pub(crate) struct SdkLlmClient {
     writer: Arc<StdoutWriter>,
     reader: Arc<StdinReader>,
+    agent_id: String,
 }
 
 impl SdkLlmClient {
-    pub(crate) fn new(writer: Arc<StdoutWriter>, reader: Arc<StdinReader>) -> Self {
-        Self { writer, reader }
+    pub(crate) fn new(writer: Arc<StdoutWriter>, reader: Arc<StdinReader>, agent_id: &str) -> Self {
+        Self { writer, reader, agent_id: agent_id.to_string() }
     }
 }
 
@@ -200,31 +183,17 @@ impl LlmClient for SdkLlmClient {
     fn chat(&self, request: &LlmRequest) -> DurableResult<LlmResponse> {
         let correlation_id = Uuid::new_v4().to_hyphenated();
 
-        // Send chat_request callback to SDK
         self.writer.send_event(
             "chat_request",
             vec![
                 ("callback_id", json::json_str(&correlation_id)),
-                (
-                    "messages",
-                    json::json_array(request.messages.iter().map(|m| m.to_json()).collect()),
-                ),
-                (
-                    "tools",
-                    request.tools.clone().unwrap_or(Value::Null),
-                ),
-                (
-                    "model",
-                    request
-                        .model
-                        .as_ref()
-                        .map(|m| json::json_str(m))
-                        .unwrap_or(Value::Null),
-                ),
+                ("agent_id", json::json_str(&self.agent_id)),
+                ("messages", json::json_array(request.messages.iter().map(|m| m.to_json()).collect())),
+                ("tools", request.tools.clone().unwrap_or(Value::Null)),
+                ("model", request.model.as_ref().map(|m| json::json_str(m)).unwrap_or(Value::Null)),
             ],
         );
 
-        // Wait for chat_response from SDK
         let response = self
             .reader
             .wait_for_response(&correlation_id)
@@ -233,7 +202,6 @@ impl LlmClient for SdkLlmClient {
                 retryable: true,
             })?;
 
-        // Parse response
         let resp_type = response
             .get("type")
             .and_then(|v| v.as_str())
@@ -253,7 +221,6 @@ impl LlmClient for SdkLlmClient {
             });
         }
 
-        // Check for tool_calls
         if let Some(calls) = response.get("tool_calls") {
             if let Some(arr) = calls.as_array() {
                 if !arr.is_empty() {
@@ -266,7 +233,6 @@ impl LlmClient for SdkLlmClient {
             }
         }
 
-        // Text response
         let content = response
             .get("content")
             .or_else(|| response.get("text"))
@@ -278,22 +244,23 @@ impl LlmClient for SdkLlmClient {
 }
 
 // ---------------------------------------------------------------------------
-// SdkToolHandler — implements ToolHandler by calling back to the SDK
+// SdkToolRegistry — implements ToolHandler by calling back to the SDK
 // ---------------------------------------------------------------------------
 
-/// A tool registry that dispatches to the SDK via protocol callbacks.
 pub(crate) struct SdkToolRegistry {
     definitions: Vec<ToolDefinition>,
     writer: Arc<StdoutWriter>,
     reader: Arc<StdinReader>,
+    agent_id: String,
 }
 
 impl SdkToolRegistry {
-    pub(crate) fn new(writer: Arc<StdoutWriter>, reader: Arc<StdinReader>) -> Self {
+    pub(crate) fn new(writer: Arc<StdoutWriter>, reader: Arc<StdinReader>, agent_id: &str) -> Self {
         Self {
             definitions: Vec::new(),
             writer,
             reader,
+            agent_id: agent_id.to_string(),
         }
     }
 
@@ -304,29 +271,30 @@ impl SdkToolRegistry {
     pub(crate) fn into_registry(self) -> ToolRegistry {
         let writer = self.writer.clone();
         let reader = self.reader.clone();
+        let agent_id = self.agent_id.clone();
         let mut registry = ToolRegistry::new();
 
         for def in self.definitions {
             let w = writer.clone();
             let r = reader.clone();
             let tool_name = def.name.clone();
+            let aid = agent_id.clone();
 
             registry.register(
                 def,
                 crate::tool::FnToolHandler::new(move |args: &Value| {
                     let correlation_id = Uuid::new_v4().to_hyphenated();
 
-                    // Send execute_tool callback to SDK
                     w.send_event(
                         "execute_tool",
                         vec![
                             ("callback_id", json::json_str(&correlation_id)),
+                            ("agent_id", json::json_str(&aid)),
                             ("tool_name", json::json_str(&tool_name)),
                             ("arguments", args.clone()),
                         ],
                     );
 
-                    // Wait for tool_result from SDK
                     let response = r.wait_for_response(&correlation_id).map_err(|e| {
                         DurableError::ToolError {
                             tool_name: tool_name.clone(),
@@ -368,7 +336,64 @@ impl SdkToolRegistry {
 }
 
 // ---------------------------------------------------------------------------
-// SDK Mode event loop
+// Outcome emission helper
+// ---------------------------------------------------------------------------
+
+fn emit_outcome(
+    writer: &StdoutWriter,
+    agent_id: &str,
+    execution_id: &str,
+    outcome: AgentOutcome,
+) {
+    match outcome {
+        AgentOutcome::Complete { response } => {
+            writer.send_event(
+                "completed",
+                vec![
+                    ("agent_id", json::json_str(agent_id)),
+                    ("execution_id", json::json_str(execution_id)),
+                    ("response", json::json_str(&response)),
+                ],
+            );
+        }
+        AgentOutcome::Suspended { reason } => {
+            writer.send_event(
+                "suspended",
+                vec![
+                    ("agent_id", json::json_str(agent_id)),
+                    ("execution_id", json::json_str(execution_id)),
+                    ("reason", reason.to_json()),
+                ],
+            );
+        }
+        AgentOutcome::MaxIterations { last_response } => {
+            writer.send_event(
+                "completed",
+                vec![
+                    ("agent_id", json::json_str(agent_id)),
+                    ("execution_id", json::json_str(execution_id)),
+                    ("response", json::json_str(&last_response)),
+                    ("max_iterations", json::json_bool(true)),
+                ],
+            );
+        }
+        AgentOutcome::Error { error } => {
+            let retryable = crate::core::retry::Retryable::is_retryable(&error);
+            writer.send_event(
+                "error",
+                vec![
+                    ("agent_id", json::json_str(agent_id)),
+                    ("execution_id", json::json_str(execution_id)),
+                    ("message", json::json_str(&error.to_string())),
+                    ("retryable", json::json_bool(retryable)),
+                ],
+            );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SDK Mode event loop — multiplexed, non-blocking
 // ---------------------------------------------------------------------------
 
 /// Run the runtime in SDK mode, reading commands from stdin.
@@ -383,9 +408,17 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
 
     let mut authenticated = auth_token.is_none();
 
-    // Shared runtime — wrapped in Arc<Mutex> for concurrent command threads
-    let runtime: Arc<Mutex<Option<Arc<AgentRuntime>>>> = Arc::new(Mutex::new(None));
-    let mut _data_dir: Option<String> = None;
+    // Agent registry: agent_id -> AgentRuntime
+    let registry: Arc<Mutex<BTreeMap<String, Arc<AgentRuntime>>>> =
+        Arc::new(Mutex::new(BTreeMap::new()));
+
+    // Execution-to-agent mapping for routing signals/resumes
+    let exec_agent_map: Arc<Mutex<BTreeMap<String, String>>> =
+        Arc::new(Mutex::new(BTreeMap::new()));
+
+    // Currently running execution IDs (prevents double-resume)
+    let running: Arc<Mutex<std::collections::HashSet<String>>> =
+        Arc::new(Mutex::new(std::collections::HashSet::new()));
 
     while let Some(val) = reader.recv_command() {
         let msg_type = val
@@ -419,12 +452,17 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
 
         match msg_type.as_str() {
             "create_agent" => {
+                let agent_id = val
+                    .get("agent_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("default")
+                    .to_string();
+
                 let dir = val
                     .get("data_dir")
                     .and_then(|v| v.as_str())
                     .unwrap_or("./data")
                     .to_string();
-                _data_dir = Some(dir.clone());
 
                 // Parse config
                 let config_val = val.get("config").cloned().unwrap_or(Value::Null);
@@ -440,7 +478,7 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
                 }
 
                 // Parse tool definitions
-                let mut sdk_tools = SdkToolRegistry::new(writer.clone(), reader.clone());
+                let mut sdk_tools = SdkToolRegistry::new(writer.clone(), reader.clone(), &agent_id);
                 if let Some(tools_arr) = val.get("tools").and_then(|v| v.as_array()) {
                     for t in tools_arr {
                         let name = t.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -476,15 +514,15 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
                     ),
                 };
 
-                // Create LLM client that callbacks to SDK
-                let llm = Arc::new(SdkLlmClient::new(writer.clone(), reader.clone()));
+                // Create LLM client with agent_id for callback routing
+                let llm = Arc::new(SdkLlmClient::new(writer.clone(), reader.clone(), &agent_id));
                 let tools = Arc::new(sdk_tools.into_registry());
 
                 let mut rt = AgentRuntime::with_event_store(
                     config, storage, event_store, llm, tools,
                 );
 
-                // Wire up contracts: each contract name gets a callback to Python for checking
+                // Wire up contracts with agent_id in callbacks
                 if let Some(contracts_arr) = val.get("contracts").and_then(|v| v.as_array()) {
                     let mut contracts = Vec::new();
                     for c in contracts_arr {
@@ -492,6 +530,7 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
                             let w = writer.clone();
                             let r = reader.clone();
                             let contract_name = name.to_string();
+                            let aid = agent_id.clone();
                             contracts.push(crate::agent::contract::Contract {
                                 name: contract_name.clone(),
                                 check: Arc::new(move |step_name: &str, args: &Value| {
@@ -500,6 +539,7 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
                                         "check_contract",
                                         vec![
                                             ("callback_id", json::json_str(&corr_id)),
+                                            ("agent_id", json::json_str(&aid)),
                                             ("contract_name", json::json_str(&contract_name)),
                                             ("step_name", json::json_str(step_name)),
                                             ("arguments", args.clone()),
@@ -530,22 +570,39 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
                     }
                 }
 
-                *runtime.lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(rt));
+                registry.lock().unwrap_or_else(|e| e.into_inner())
+                    .insert(agent_id.clone(), Arc::new(rt));
 
                 writer.send_event(
                     "agent_created",
-                    vec![("data_dir", json::json_str(&dir))],
+                    vec![
+                        ("agent_id", json::json_str(&agent_id)),
+                        ("data_dir", json::json_str(&dir)),
+                    ],
                 );
             }
 
             "run_agent" => {
-                let rt = match runtime.lock().unwrap_or_else(|e| e.into_inner()).clone() {
+                // Resolve agent: explicit agent_id, or infer from single-agent registry
+                let agent_id = val.get("agent_id").and_then(|v| v.as_str())
+                    .map(String::from)
+                    .unwrap_or_else(|| {
+                        let reg = registry.lock().unwrap_or_else(|e| e.into_inner());
+                        if reg.len() == 1 {
+                            reg.keys().next().unwrap().clone()
+                        } else {
+                            "default".to_string()
+                        }
+                    });
+
+                let rt = match registry.lock().unwrap_or_else(|e| e.into_inner()).get(&agent_id).cloned() {
                     Some(r) => r,
                     None => {
                         writer.send_event(
                             "error",
                             vec![
-                                ("message", json::json_str("no agent created")),
+                                ("agent_id", json::json_str(&agent_id)),
+                                ("message", json::json_str(&format!("no agent with id '{}'", agent_id))),
                                 ("retryable", json::json_bool(false)),
                             ],
                         );
@@ -556,7 +613,8 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
                 let input = val
                     .get("input")
                     .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                    .unwrap_or("")
+                    .to_string();
 
                 let exec_id = val
                     .get("execution_id")
@@ -567,8 +625,6 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
                             .map(ExecutionId::from_uuid)
                     });
 
-                // Always use start_with_id so we know the execution_id for the response.
-                // If the execution already exists (re-run with same ID), resume instead.
                 let run_id = exec_id.unwrap_or_else(ExecutionId::new);
                 let run_id_str = run_id.to_string();
 
@@ -576,72 +632,67 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
                 let already_exists = exec_id.is_some()
                     && rt.event_store().events(run_id).map(|e| !e.is_empty()).unwrap_or(false);
 
-                let outcome = if already_exists {
-                    rt.resume(run_id)
-                } else {
-                    rt.start_with_id(run_id, input)
-                };
+                // Track execution -> agent mapping
+                exec_agent_map.lock().unwrap_or_else(|e| e.into_inner())
+                    .insert(run_id_str.clone(), agent_id.clone());
 
-                match outcome {
-                    AgentOutcome::Complete { response } => {
-                        writer.send_event(
-                            "completed",
-                            vec![
-                                ("response", json::json_str(&response)),
-                                ("execution_id", json::json_str(&run_id_str)),
-                            ],
-                        );
-                    }
-                    AgentOutcome::Suspended { reason } => {
-                        let reason_json = reason.to_json();
-                        writer.send_event(
-                            "suspended",
-                            vec![
-                                ("reason", reason_json),
-                                ("execution_id", json::json_str(&run_id_str)),
-                            ],
-                        );
-                    }
-                    AgentOutcome::MaxIterations { last_response } => {
-                        writer.send_event(
-                            "completed",
-                            vec![
-                                ("response", json::json_str(&last_response)),
-                                ("execution_id", json::json_str(&run_id_str)),
-                                ("max_iterations", json::json_bool(true)),
-                            ],
-                        );
-                    }
-                    AgentOutcome::Error { error } => {
+                // Mark as running
+                if !running.lock().unwrap_or_else(|e| e.into_inner()).insert(run_id_str.clone()) {
+                    // Already running — don't double-execute
+                    writer.send_event(
+                        "error",
+                        vec![
+                            ("agent_id", json::json_str(&agent_id)),
+                            ("execution_id", json::json_str(&run_id_str)),
+                            ("message", json::json_str("execution already running")),
+                            ("retryable", json::json_bool(false)),
+                        ],
+                    );
+                    continue;
+                }
+
+                // Spawn execution thread — command loop is free immediately
+                let w = writer.clone();
+                let aid = agent_id.clone();
+                let rid = run_id_str.clone();
+                let running_ref = running.clone();
+
+                std::thread::Builder::new()
+                    .name(format!("agent-{}-{}", agent_id, &run_id_str[..8]))
+                    .spawn(move || {
+                        let outcome = if already_exists {
+                            rt.resume(run_id)
+                        } else {
+                            rt.start_with_id(run_id, &input)
+                        };
+                        emit_outcome(&w, &aid, &rid, outcome);
+                        running_ref.lock().unwrap_or_else(|e| e.into_inner()).remove(&rid);
+                    })
+                    .unwrap_or_else(|e| {
+                        eprintln!("[sdk-mode] failed to spawn agent thread: {}", e);
+                        running.lock().unwrap_or_else(|e| e.into_inner()).remove(&run_id_str);
                         writer.send_event(
                             "error",
                             vec![
-                                ("message", json::json_str(&error.to_string())),
+                                ("agent_id", json::json_str(&agent_id)),
                                 ("execution_id", json::json_str(&run_id_str)),
-                                ("retryable", json::json_bool(false)),
+                                ("message", json::json_str(&format!("thread spawn failed: {}", e))),
+                                ("retryable", json::json_bool(true)),
                             ],
                         );
-                    }
-                }
+                        // Return a dummy handle (won't be used since we already sent error)
+                        std::thread::spawn(|| {})
+                    });
             }
 
             "resume_agent" => {
-                let rt = match runtime.lock().unwrap_or_else(|e| e.into_inner()).clone() {
-                    Some(r) => r,
-                    None => {
-                        writer.send_event(
-                            "error",
-                            vec![("message", json::json_str("no agent created"))],
-                        );
-                        continue;
-                    }
-                };
-
                 let exec_id_str = val
                     .get("execution_id")
                     .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let exec_id = match crate::core::uuid::Uuid::parse(exec_id_str) {
+                    .unwrap_or("")
+                    .to_string();
+
+                let exec_id = match crate::core::uuid::Uuid::parse(&exec_id_str) {
                     Ok(uuid) => ExecutionId::from_uuid(uuid),
                     Err(e) => {
                         writer.send_event(
@@ -652,54 +703,93 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
                     }
                 };
 
-                let resume_id_str = exec_id_str.to_string();
-                let outcome = rt.resume(exec_id);
-                match outcome {
-                    AgentOutcome::Complete { response } => {
-                        writer.send_event(
-                            "completed",
-                            vec![
-                                ("response", json::json_str(&response)),
-                                ("execution_id", json::json_str(&resume_id_str)),
-                            ],
-                        );
-                    }
-                    AgentOutcome::Suspended { reason } => {
-                        writer.send_event(
-                            "suspended",
-                            vec![
-                                ("reason", reason.to_json()),
-                                ("execution_id", json::json_str(&resume_id_str)),
-                            ],
-                        );
-                    }
-                    AgentOutcome::Error { error } => {
+                // Resolve agent: explicit agent_id, or look up from exec_agent_map, or infer
+                let agent_id = val.get("agent_id").and_then(|v| v.as_str())
+                    .map(String::from)
+                    .or_else(|| {
+                        exec_agent_map.lock().unwrap_or_else(|e| e.into_inner())
+                            .get(&exec_id_str).cloned()
+                    })
+                    .unwrap_or_else(|| {
+                        let reg = registry.lock().unwrap_or_else(|e| e.into_inner());
+                        if reg.len() == 1 {
+                            reg.keys().next().unwrap().clone()
+                        } else {
+                            "default".to_string()
+                        }
+                    });
+
+                let rt = match registry.lock().unwrap_or_else(|e| e.into_inner()).get(&agent_id).cloned() {
+                    Some(r) => r,
+                    None => {
                         writer.send_event(
                             "error",
                             vec![
-                                ("message", json::json_str(&error.to_string())),
-                                ("execution_id", json::json_str(&resume_id_str)),
+                                ("agent_id", json::json_str(&agent_id)),
+                                ("message", json::json_str(&format!("no agent with id '{}'", agent_id))),
                             ],
                         );
+                        continue;
                     }
-                    AgentOutcome::MaxIterations { last_response } => {
-                        writer.send_event(
-                            "completed",
-                            vec![
-                                ("response", json::json_str(&last_response)),
-                                ("execution_id", json::json_str(&resume_id_str)),
-                            ],
-                        );
-                    }
+                };
+
+                // Mark as running
+                if !running.lock().unwrap_or_else(|e| e.into_inner()).insert(exec_id_str.clone()) {
+                    writer.send_event(
+                        "error",
+                        vec![
+                            ("agent_id", json::json_str(&agent_id)),
+                            ("execution_id", json::json_str(&exec_id_str)),
+                            ("message", json::json_str("execution already running")),
+                            ("retryable", json::json_bool(false)),
+                        ],
+                    );
+                    continue;
                 }
+
+                let w = writer.clone();
+                let aid = agent_id.clone();
+                let rid = exec_id_str.clone();
+                let running_ref = running.clone();
+
+                std::thread::Builder::new()
+                    .name(format!("resume-{}", &exec_id_str[..8]))
+                    .spawn(move || {
+                        let outcome = rt.resume(exec_id);
+                        emit_outcome(&w, &aid, &rid, outcome);
+                        running_ref.lock().unwrap_or_else(|e| e.into_inner()).remove(&rid);
+                    })
+                    .unwrap_or_else(|e| {
+                        eprintln!("[sdk-mode] failed to spawn resume thread: {}", e);
+                        running.lock().unwrap_or_else(|e| e.into_inner()).remove(&exec_id_str);
+                        std::thread::spawn(|| {})
+                    });
             }
 
             "signal" => {
-                let rt = match runtime.lock().unwrap_or_else(|e| e.into_inner()).clone() {
+                let exec_id_str = val.get("execution_id").and_then(|v| v.as_str()).unwrap_or("");
+
+                // Resolve agent from exec_agent_map or infer
+                let agent_id = val.get("agent_id").and_then(|v| v.as_str())
+                    .map(String::from)
+                    .or_else(|| {
+                        exec_agent_map.lock().unwrap_or_else(|e| e.into_inner())
+                            .get(exec_id_str).cloned()
+                    })
+                    .unwrap_or_else(|| {
+                        let reg = registry.lock().unwrap_or_else(|e| e.into_inner());
+                        if reg.len() == 1 {
+                            reg.keys().next().unwrap().clone()
+                        } else {
+                            "default".to_string()
+                        }
+                    });
+
+                let rt = match registry.lock().unwrap_or_else(|e| e.into_inner()).get(&agent_id).cloned() {
                     Some(r) => r,
                     None => continue,
                 };
-                let exec_id_str = val.get("execution_id").and_then(|v| v.as_str()).unwrap_or("");
+
                 if let Ok(uuid) = crate::core::uuid::Uuid::parse(exec_id_str) {
                     let exec_id = ExecutionId::from_uuid(uuid);
                     let signal_name = val.get("signal_name").and_then(|v| v.as_str()).unwrap_or("");
@@ -712,9 +802,6 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
                 writer.send_event("shutdown_ack", vec![]);
                 break;
             }
-
-            // Callback responses are handled by the reader thread —
-            // they never reach the command channel.
 
             other => {
                 eprintln!("[sdk-mode] unknown command: {}", other);
