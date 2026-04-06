@@ -168,10 +168,21 @@ class Runtime:
         threading.Thread(target=watcher, daemon=True, name=f"rt-watch-{exec_id[:8]}").start()
 
     def shutdown(self, timeout: float = 30) -> None:
-        """Shut down the runtime. Active agents are interrupted."""
-        if self._protocol:
+        """Gracefully shut down the runtime.
+
+        Sends shutdown command, waits for active agents to drain (up to
+        ``timeout`` seconds), then stops the subprocess.
+        """
+        if self._protocol and self._started:
+            try:
+                self._protocol.send_fire_and_forget("shutdown")
+                # Wait for shutdown_ack — the engine drains active agents first
+                self._protocol.wait_for_event("shutdown_ack", timeout=timeout)
+            except (TimeoutError, Exception):
+                pass  # force kill below
             self._protocol.stop()
-        self._runtime_mgr.stop()
+        if hasattr(self, '_runtime_mgr') and self._runtime_mgr:
+            self._runtime_mgr.stop()
         self._started = False
         self._protocol = None
 

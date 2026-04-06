@@ -416,22 +416,29 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
     let exec_agent_map: Arc<Mutex<BTreeMap<String, String>>> =
         Arc::new(Mutex::new(BTreeMap::new()));
 
-    // Currently running execution IDs (prevents double-resume)
-    let running: Arc<Mutex<std::collections::HashSet<String>>> =
-        Arc::new(Mutex::new(std::collections::HashSet::new()));
+    // Running executions: exec_id -> JoinHandle (for drain on shutdown)
+    let running: Arc<Mutex<BTreeMap<String, std::thread::JoinHandle<()>>>> =
+        Arc::new(Mutex::new(BTreeMap::new()));
+
+    // Shared cancellation token: cancel() triggers graceful shutdown of all agents
+    let cancel_token = crate::core::cancel::CancellationToken::new();
+
+    // Shutdown flag for the event loop thread
+    let shutdown_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
     // Event loop thread: watches for signals/timers and auto-resumes suspended agents.
-    // Scans every 200ms. Only resumes if the execution is not already running.
+    // Scans every 200ms. Exits when shutdown_flag is set.
     {
         let registry = registry.clone();
         let exec_agent_map = exec_agent_map.clone();
         let running = running.clone();
         let writer = writer.clone();
+        let shutdown_flag = shutdown_flag.clone();
 
         std::thread::Builder::new()
             .name("durable-event-loop".to_string())
             .spawn(move || {
-                loop {
+                while !shutdown_flag.load(std::sync::atomic::Ordering::SeqCst) {
                     std::thread::sleep(std::time::Duration::from_millis(200));
 
                     // Snapshot the registry to avoid holding the lock during I/O
@@ -453,7 +460,7 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
                             let exec_id_str = meta.id.to_string();
 
                             // Skip if already running
-                            if running.lock().unwrap_or_else(|e| e.into_inner()).contains(&exec_id_str) {
+                            if running.lock().unwrap_or_else(|e| e.into_inner()).contains_key(&exec_id_str) {
                                 continue;
                             }
 
@@ -486,11 +493,12 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
                             };
 
                             if should_resume {
-                                // Mark as running
-                                if !running.lock().unwrap_or_else(|e| e.into_inner())
-                                    .insert(exec_id_str.clone())
+                                // Check if already running
                                 {
-                                    continue; // race: another thread got it
+                                    let r = running.lock().unwrap_or_else(|e| e.into_inner());
+                                    if r.contains_key(&exec_id_str) {
+                                        continue;
+                                    }
                                 }
 
                                 // Track exec -> agent mapping
@@ -504,14 +512,18 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
                                 let exec_id = meta.id;
                                 let running_ref = running.clone();
 
-                                let _ = std::thread::Builder::new()
+                                if let Ok(handle) = std::thread::Builder::new()
                                     .name(format!("auto-resume-{}", &rid[..8]))
                                     .spawn(move || {
                                         let outcome = rt.resume(exec_id);
                                         emit_outcome(&w, &aid, &rid, outcome);
                                         running_ref.lock().unwrap_or_else(|e| e.into_inner())
                                             .remove(&rid);
-                                    });
+                                    })
+                                {
+                                    running.lock().unwrap_or_else(|e| e.into_inner())
+                                        .insert(exec_id_str, handle);
+                                }
                             }
                         }
                     }
@@ -670,6 +682,9 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
                     }
                 }
 
+                // Share the process-wide cancellation token for graceful shutdown
+                rt.set_cancel_token(cancel_token.clone());
+
                 registry.lock().unwrap_or_else(|e| e.into_inner())
                     .insert(agent_id.clone(), Arc::new(rt));
 
@@ -736,19 +751,21 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
                 exec_agent_map.lock().unwrap_or_else(|e| e.into_inner())
                     .insert(run_id_str.clone(), agent_id.clone());
 
-                // Mark as running
-                if !running.lock().unwrap_or_else(|e| e.into_inner()).insert(run_id_str.clone()) {
-                    // Already running — don't double-execute
-                    writer.send_event(
-                        "error",
-                        vec![
-                            ("agent_id", json::json_str(&agent_id)),
-                            ("execution_id", json::json_str(&run_id_str)),
-                            ("message", json::json_str("execution already running")),
-                            ("retryable", json::json_bool(false)),
-                        ],
-                    );
-                    continue;
+                // Check if already running
+                {
+                    let r = running.lock().unwrap_or_else(|e| e.into_inner());
+                    if r.contains_key(&run_id_str) {
+                        writer.send_event(
+                            "error",
+                            vec![
+                                ("agent_id", json::json_str(&agent_id)),
+                                ("execution_id", json::json_str(&run_id_str)),
+                                ("message", json::json_str("execution already running")),
+                                ("retryable", json::json_bool(false)),
+                            ],
+                        );
+                        continue;
+                    }
                 }
 
                 // Spawn execution thread — command loop is free immediately
@@ -757,7 +774,7 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
                 let rid = run_id_str.clone();
                 let running_ref = running.clone();
 
-                std::thread::Builder::new()
+                match std::thread::Builder::new()
                     .name(format!("agent-{}-{}", agent_id, &run_id_str[..8]))
                     .spawn(move || {
                         let outcome = if already_exists {
@@ -768,9 +785,13 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
                         emit_outcome(&w, &aid, &rid, outcome);
                         running_ref.lock().unwrap_or_else(|e| e.into_inner()).remove(&rid);
                     })
-                    .unwrap_or_else(|e| {
+                {
+                    Ok(handle) => {
+                        running.lock().unwrap_or_else(|e| e.into_inner())
+                            .insert(run_id_str, handle);
+                    }
+                    Err(e) => {
                         eprintln!("[sdk-mode] failed to spawn agent thread: {}", e);
-                        running.lock().unwrap_or_else(|e| e.into_inner()).remove(&run_id_str);
                         writer.send_event(
                             "error",
                             vec![
@@ -780,9 +801,8 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
                                 ("retryable", json::json_bool(true)),
                             ],
                         );
-                        // Return a dummy handle (won't be used since we already sent error)
-                        std::thread::spawn(|| {})
-                    });
+                    }
+                }
             }
 
             "resume_agent" => {
@@ -833,18 +853,21 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
                     }
                 };
 
-                // Mark as running
-                if !running.lock().unwrap_or_else(|e| e.into_inner()).insert(exec_id_str.clone()) {
-                    writer.send_event(
-                        "error",
-                        vec![
-                            ("agent_id", json::json_str(&agent_id)),
-                            ("execution_id", json::json_str(&exec_id_str)),
-                            ("message", json::json_str("execution already running")),
-                            ("retryable", json::json_bool(false)),
-                        ],
-                    );
-                    continue;
+                // Check if already running
+                {
+                    let r = running.lock().unwrap_or_else(|e| e.into_inner());
+                    if r.contains_key(&exec_id_str) {
+                        writer.send_event(
+                            "error",
+                            vec![
+                                ("agent_id", json::json_str(&agent_id)),
+                                ("execution_id", json::json_str(&exec_id_str)),
+                                ("message", json::json_str("execution already running")),
+                                ("retryable", json::json_bool(false)),
+                            ],
+                        );
+                        continue;
+                    }
                 }
 
                 let w = writer.clone();
@@ -852,18 +875,22 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
                 let rid = exec_id_str.clone();
                 let running_ref = running.clone();
 
-                std::thread::Builder::new()
+                match std::thread::Builder::new()
                     .name(format!("resume-{}", &exec_id_str[..8]))
                     .spawn(move || {
                         let outcome = rt.resume(exec_id);
                         emit_outcome(&w, &aid, &rid, outcome);
                         running_ref.lock().unwrap_or_else(|e| e.into_inner()).remove(&rid);
                     })
-                    .unwrap_or_else(|e| {
+                {
+                    Ok(handle) => {
+                        running.lock().unwrap_or_else(|e| e.into_inner())
+                            .insert(exec_id_str, handle);
+                    }
+                    Err(e) => {
                         eprintln!("[sdk-mode] failed to spawn resume thread: {}", e);
-                        running.lock().unwrap_or_else(|e| e.into_inner()).remove(&exec_id_str);
-                        std::thread::spawn(|| {})
-                    });
+                    }
+                }
             }
 
             "signal" => {
@@ -899,6 +926,31 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
             }
 
             "shutdown" => {
+                // Graceful shutdown: cancel all agents, drain threads, ack
+                // 1. Stop the event loop
+                shutdown_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+
+                // 2. Cancel all active agents (they'll suspend at next step boundary)
+                cancel_token.cancel();
+
+                // 3. Drain active threads (30s timeout)
+                let handles: BTreeMap<String, std::thread::JoinHandle<()>> = {
+                    let mut r = running.lock().unwrap_or_else(|e| e.into_inner());
+                    std::mem::take(&mut *r)
+                };
+
+                let drain_deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+                for (exec_id, handle) in handles.into_iter() {
+                    let remaining = drain_deadline.saturating_duration_since(std::time::Instant::now());
+                    if remaining.is_zero() {
+                        eprintln!("[sdk-mode] drain timeout: execution {} still running", exec_id);
+                        break;
+                    }
+                    // Can't join with timeout in std, so we just join and hope
+                    // the CancellationToken causes a timely exit
+                    let _ = handle.join();
+                }
+
                 writer.send_event("shutdown_ack", vec![]);
                 break;
             }
