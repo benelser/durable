@@ -20,6 +20,26 @@ pub fn hash_params(json_str: &str) -> u64 {
     fnv1a_hash(json_str.as_bytes())
 }
 
+/// Hash tool definitions for drift detection.
+/// Sorts by name for deterministic ordering, serializes each to JSON,
+/// concatenates with separator, and hashes the result.
+pub fn hash_tool_definitions(definitions: &[crate::tool::ToolDefinition]) -> u64 {
+    let mut sorted: Vec<&crate::tool::ToolDefinition> = definitions.iter().collect();
+    sorted.sort_by(|a, b| a.name.cmp(&b.name));
+    let mut combined = String::new();
+    for (i, def) in sorted.iter().enumerate() {
+        if i > 0 {
+            combined.push('|');
+        }
+        combined.push_str(&def.name);
+        combined.push(':');
+        combined.push_str(&def.description);
+        combined.push(':');
+        combined.push_str(&crate::json::to_string(&def.parameters));
+    }
+    fnv1a_hash(combined.as_bytes())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

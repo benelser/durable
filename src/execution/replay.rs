@@ -61,13 +61,22 @@ pub struct ReplayContext {
 
 impl ReplayContext {
     /// Create a new context for a brand-new execution.
-    pub fn new(id: ExecutionId, event_store: Arc<dyn EventStore>, system_prompt: Option<&str>, cancel_token: Option<CancellationToken>) -> DurableResult<Self> {
+    pub fn new(
+        id: ExecutionId,
+        event_store: Arc<dyn EventStore>,
+        system_prompt: Option<&str>,
+        cancel_token: Option<CancellationToken>,
+        agent_id: Option<&str>,
+        tools_hash: Option<u64>,
+    ) -> DurableResult<Self> {
         let prompt_hash = system_prompt.map(|p| fnv1a_hash(p.as_bytes()));
         event_store
             .append(id, EventType::ExecutionCreated {
                 version: None,
                 prompt_hash,
                 prompt_text: system_prompt.map(String::from),
+                agent_id: agent_id.map(String::from),
+                tools_hash,
             })
             .map_err(|e| DurableError::Storage(e))?;
 
@@ -98,6 +107,8 @@ impl ReplayContext {
         version: &str,
         system_prompt: Option<&str>,
         cancel_token: Option<CancellationToken>,
+        agent_id: Option<&str>,
+        tools_hash: Option<u64>,
     ) -> DurableResult<Self> {
         let prompt_hash = system_prompt.map(|p| fnv1a_hash(p.as_bytes()));
         event_store
@@ -107,6 +118,8 @@ impl ReplayContext {
                     version: Some(version.to_string()),
                     prompt_hash,
                     prompt_text: system_prompt.map(String::from),
+                    agent_id: agent_id.map(String::from),
+                    tools_hash,
                 },
             )
             .map_err(|e| DurableError::Storage(e))?;
@@ -137,7 +150,7 @@ impl ReplayContext {
     ///
     /// Acquires a lease with TTL for mutual exclusion. If another worker
     /// holds an active lease, this call fails with `InvalidState`.
-    pub fn resume(id: ExecutionId, event_store: Arc<dyn EventStore>, system_prompt: Option<&str>, cancel_token: Option<CancellationToken>) -> DurableResult<Self> {
+    pub fn resume(id: ExecutionId, event_store: Arc<dyn EventStore>, system_prompt: Option<&str>, cancel_token: Option<CancellationToken>, tools_hash: Option<u64>) -> DurableResult<Self> {
         // Try snapshot-based fast resume first
         let snapshot = event_store
             .latest_snapshot(id)
@@ -162,11 +175,20 @@ impl ReplayContext {
         };
 
         // Invariant I: detect prompt drift between original execution and resume.
-        // If the original execution recorded a prompt hash, the current prompt must match.
         if let (Some(stored_hash), Some(current_prompt)) = (state.prompt_hash, system_prompt) {
             let current_hash = fnv1a_hash(current_prompt.as_bytes());
             if stored_hash != current_hash {
                 return Err(DurableError::PromptDrift {
+                    stored_hash,
+                    current_hash,
+                });
+            }
+        }
+
+        // Detect tool definition drift between original execution and resume.
+        if let (Some(stored_hash), Some(current_hash)) = (state.tools_hash, tools_hash) {
+            if stored_hash != current_hash {
+                return Err(DurableError::ToolDrift {
                     stored_hash,
                     current_hash,
                 });
@@ -222,6 +244,7 @@ impl ReplayContext {
         expected_version: &str,
         system_prompt: Option<&str>,
         cancel_token: Option<CancellationToken>,
+        tools_hash: Option<u64>,
     ) -> DurableResult<Self> {
         let history = event_store
             .events(id)

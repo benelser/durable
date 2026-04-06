@@ -97,6 +97,12 @@ pub enum EventType {
         prompt_hash: Option<u64>,
         /// The full system prompt text, stored once for auditability.
         prompt_text: Option<String>,
+        /// Agent identity for multi-agent routing. Persisted so exec→agent
+        /// mapping can be rebuilt after process restart.
+        agent_id: Option<String>,
+        /// FNV-1a hash of tool definitions at creation time.
+        /// Used to detect tool drift on replay.
+        tools_hash: Option<u64>,
     },
     /// A step began executing.
     StepStarted {
@@ -267,11 +273,13 @@ impl FromJson for Event {
 impl ToJson for EventType {
     fn to_json(&self) -> Value {
         match self {
-            EventType::ExecutionCreated { version, prompt_hash, prompt_text } => json::json_object(vec![
+            EventType::ExecutionCreated { version, prompt_hash, prompt_text, agent_id, tools_hash } => json::json_object(vec![
                 ("type", json::json_str("execution_created")),
                 ("version", version.as_ref().map_or(Value::Null, |v| json::json_str(v))),
                 ("prompt_hash", prompt_hash.map_or(Value::Null, |h| json::json_string(format!("{:016x}", h)))),
                 ("prompt_text", prompt_text.as_ref().map_or(Value::Null, |t| json::json_str(t))),
+                ("agent_id", agent_id.as_ref().map_or(Value::Null, |a| json::json_str(a))),
+                ("tools_hash", tools_hash.map_or(Value::Null, |h| json::json_string(format!("{:016x}", h)))),
             ]),
             EventType::StepStarted { step_number, step_name, param_hash, params } => {
                 json::json_object(vec![
@@ -408,6 +416,9 @@ impl FromJson for EventType {
                 prompt_hash: val.get("prompt_hash").and_then(|v| v.as_str())
                     .and_then(|s| u64::from_str_radix(s, 16).ok()),
                 prompt_text: val.get("prompt_text").and_then(|v| v.as_str()).map(String::from),
+                agent_id: val.get("agent_id").and_then(|v| v.as_str()).map(String::from),
+                tools_hash: val.get("tools_hash").and_then(|v| v.as_str())
+                    .and_then(|s| u64::from_str_radix(s, 16).ok()),
             }),
             "step_started" => Ok(EventType::StepStarted {
                 step_number: val.get("step_number").and_then(|v| v.as_u64()).unwrap_or(0),
@@ -1253,6 +1264,10 @@ pub struct ExecutionState {
     pub prompt_hash: Option<u64>,
     /// The full system prompt text recorded at execution creation.
     pub prompt_text: Option<String>,
+    /// Agent identity (for multi-agent routing across restarts).
+    pub agent_id: Option<String>,
+    /// FNV-1a hash of tool definitions at creation.
+    pub tools_hash: Option<u64>,
     pub step_count: u64,
     pub created_at: u64,
     pub updated_at: u64,
@@ -1364,6 +1379,8 @@ impl ToJson for ExecutionState {
             ("version", self.version.as_ref().map_or(Value::Null, |v| json::json_str(v))),
             ("prompt_hash", self.prompt_hash.map_or(Value::Null, |h| json::json_string(format!("{:016x}", h)))),
             ("prompt_text", self.prompt_text.as_ref().map_or(Value::Null, |t| json::json_str(t))),
+            ("agent_id", self.agent_id.as_ref().map_or(Value::Null, |a| json::json_str(a))),
+            ("tools_hash", self.tools_hash.map_or(Value::Null, |h| json::json_string(format!("{:016x}", h)))),
             ("step_count", json::json_num(self.step_count as f64)),
             ("created_at", json::json_num(self.created_at as f64)),
             ("updated_at", json::json_num(self.updated_at as f64)),
@@ -1450,6 +1467,9 @@ impl FromJson for ExecutionState {
             prompt_hash: val.get("prompt_hash").and_then(|v| v.as_str())
                 .and_then(|s| u64::from_str_radix(s, 16).ok()),
             prompt_text: val.get("prompt_text").and_then(|v| v.as_str()).map(String::from),
+            agent_id: val.get("agent_id").and_then(|v| v.as_str()).map(String::from),
+            tools_hash: val.get("tools_hash").and_then(|v| v.as_str())
+                .and_then(|s| u64::from_str_radix(s, 16).ok()),
             step_count: val.get("step_count").and_then(|v| v.as_u64()).unwrap_or(0),
             created_at: val.get("created_at").and_then(|v| v.as_u64()).unwrap_or(0),
             updated_at: val.get("updated_at").and_then(|v| v.as_u64()).unwrap_or(0),
@@ -1495,6 +1515,8 @@ impl ExecutionState {
             version: None,
             prompt_hash: None,
             prompt_text: None,
+            agent_id: None,
+            tools_hash: None,
             step_count: 0,
             created_at: 0,
             updated_at: 0,
@@ -1541,11 +1563,13 @@ impl ExecutionState {
         self.updated_at = event.timestamp;
 
         match &event.event_type {
-            EventType::ExecutionCreated { version, prompt_hash, prompt_text } => {
+            EventType::ExecutionCreated { version, prompt_hash, prompt_text, agent_id, tools_hash } => {
                 self.created_at = event.timestamp;
                 self.version = version.clone();
                 self.prompt_hash = *prompt_hash;
                 self.prompt_text = prompt_text.clone();
+                self.agent_id = agent_id.clone();
+                self.tools_hash = *tools_hash;
                 self.status = crate::core::types::ExecutionStatus::Running;
             }
             EventType::StepStarted { step_number, step_name, param_hash, params } => {

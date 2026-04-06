@@ -684,6 +684,7 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
 
                 // Share the process-wide cancellation token for graceful shutdown
                 rt.set_cancel_token(cancel_token.clone());
+                rt.set_agent_id(agent_id.clone());
 
                 registry.lock().unwrap_or_else(|e| e.into_inner())
                     .insert(agent_id.clone(), Arc::new(rt));

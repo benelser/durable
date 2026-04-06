@@ -99,6 +99,7 @@ pub struct AgentRuntime {
     budget: Option<crate::agent::budget::Budget>,
     logger: Arc<dyn Logger>,
     cancel_token: CancellationToken,
+    agent_id: Option<String>,
 }
 
 impl AgentRuntime {
@@ -122,6 +123,7 @@ impl AgentRuntime {
             budget: None,
             logger: Arc::new(NullLogger),
             cancel_token: CancellationToken::new(),
+            agent_id: None,
         }
     }
 
@@ -146,6 +148,7 @@ impl AgentRuntime {
             budget: None,
             logger: Arc::new(NullLogger),
             cancel_token: CancellationToken::new(),
+            agent_id: None,
         }
     }
 
@@ -220,6 +223,11 @@ impl AgentRuntime {
         self.cancel_token = token;
     }
 
+    /// Set the agent identity (used for exec→agent mapping across restarts).
+    pub fn set_agent_id(&mut self, id: String) {
+        self.agent_id = Some(id);
+    }
+
     /// Get an inspector for querying execution state.
     pub fn inspector(&self) -> crate::observe::ExecutionInspector {
         crate::observe::ExecutionInspector::new(self.storage.clone())
@@ -240,7 +248,15 @@ impl AgentRuntime {
         }
 
         // Create the event-sourced replay context for durable step execution
-        let replay_ctx = match ReplayContext::new(exec_id, self.event_store.clone(), Some(&self.config.system_prompt), Some(self.cancel_token.clone())) {
+        let tools_hash = crate::core::hash::hash_tool_definitions(self.tools.definitions());
+        let replay_ctx = match ReplayContext::new(
+            exec_id,
+            self.event_store.clone(),
+            Some(&self.config.system_prompt),
+            Some(self.cancel_token.clone()),
+            self.agent_id.as_deref(),
+            Some(tools_hash),
+        ) {
             Ok(ctx) => ctx,
             Err(e) => return AgentOutcome::Error { error: e },
         };
@@ -271,7 +287,14 @@ impl AgentRuntime {
 
         // Resume the event-sourced replay context (loads history, increments generation)
         // Passes system_prompt for drift detection (Invariant I).
-        let replay_ctx = match ReplayContext::resume(exec_id, self.event_store.clone(), Some(&self.config.system_prompt), Some(self.cancel_token.clone())) {
+        let tools_hash = crate::core::hash::hash_tool_definitions(self.tools.definitions());
+        let replay_ctx = match ReplayContext::resume(
+            exec_id,
+            self.event_store.clone(),
+            Some(&self.config.system_prompt),
+            Some(self.cancel_token.clone()),
+            Some(tools_hash),
+        ) {
             Ok(ctx) => ctx,
             Err(e) => return AgentOutcome::Error { error: e },
         };

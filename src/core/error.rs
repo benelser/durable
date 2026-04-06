@@ -62,6 +62,11 @@ pub enum DurableError {
         stored_hash: u64,
         current_hash: u64,
     },
+    /// Tool definitions changed between execution and resume.
+    ToolDrift {
+        stored_hash: u64,
+        current_hash: u64,
+    },
     /// Fencing violation — a stale worker tried to write.
     StaleGeneration {
         expected: u64,
@@ -156,6 +161,12 @@ impl fmt::Display for DurableError {
                 "non-determinism detected at step {}: expected '{}', got '{}'",
                 step_number, expected_name, actual_name
             ),
+            DurableError::ToolDrift { stored_hash, current_hash } => write!(
+                f,
+                "tool definitions changed between execution and resume \
+                 (stored {:016x}, current {:016x}) — start a new execution or restore original tools",
+                stored_hash, current_hash
+            ),
             DurableError::PromptDrift { stored_hash, current_hash } => write!(
                 f,
                 "system prompt changed between execution and resume \
@@ -192,6 +203,7 @@ impl Retryable for DurableError {
             DurableError::Cancelled => false,
             DurableError::NonDeterminismDetected { .. } => false,
             DurableError::PromptDrift { .. } => false,
+            DurableError::ToolDrift { .. } => false,
             DurableError::StaleGeneration { .. } => false,
             DurableError::Suspended(_) => false,
 

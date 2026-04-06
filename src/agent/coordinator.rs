@@ -178,10 +178,10 @@ impl AgentCoordinator {
         }
 
         // Create or resume the coordinator's replay context
-        let replay_ctx = match ReplayContext::resume(exec_id, self.event_store.clone(), None, None) {
+        let replay_ctx = match ReplayContext::resume(exec_id, self.event_store.clone(), None, None, None) {
             Ok(ctx) => ctx,
             Err(DurableError::NotFound(_)) => {
-                ReplayContext::new(exec_id, self.event_store.clone(), None, None)?
+                ReplayContext::new(exec_id, self.event_store.clone(), None, None, None, None)?
             }
             Err(e) => return Err(e),
         };

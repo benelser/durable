@@ -132,7 +132,7 @@ fn bench_ndjson_append_comparison() {
 
     let store = FileEventStore::new(&dir).unwrap();
     let exec_id = ExecutionId::new();
-    store.append(exec_id, EventType::ExecutionCreated { version: None, prompt_hash: None, prompt_text: None }).unwrap();
+    store.append(exec_id, EventType::ExecutionCreated { version: None, prompt_hash: None, prompt_text: None, agent_id: None, tools_hash: None }).unwrap();
 
     let count = 100; // Small count — fsync dominates at this scale
     let start = Instant::now();
