@@ -147,14 +147,20 @@ class Runtime:
                 return
             try:
                 for event in protocol.collect_agent_stream(
-                    agent_id, "completed", "suspended", "error", timeout=3600
+                    agent_id, "completed", "error", timeout=3600
                 ):
                     etype = event.get("type", "")
+                    if etype == "suspended" and on_suspend:
+                        # Suspension is NOT terminal in auto-resume model.
+                        # Fire the callback but keep watching — the event loop
+                        # will detect the signal and auto-resume, eventually
+                        # producing a completed or error event.
+                        on_suspend(agent_id, exec_id, event.get("reason", {}))
+                        continue
                     if etype == "completed" and on_complete:
                         on_complete(agent_id, exec_id, event.get("response", ""))
-                    elif etype == "suspended" and on_suspend:
-                        on_suspend(agent_id, exec_id, event.get("reason", {}))
-                    if etype in ("completed", "suspended", "error"):
+                        break
+                    if etype == "error":
                         break
             except (TimeoutError, Exception):
                 pass
