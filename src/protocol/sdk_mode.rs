@@ -521,12 +521,15 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
                 // If the execution already exists (re-run with same ID), resume instead.
                 let run_id = exec_id.unwrap_or_else(ExecutionId::new);
                 let run_id_str = run_id.to_string();
-                let outcome = match rt.start_with_id(run_id, input) {
-                    AgentOutcome::Error { .. } if exec_id.is_some() => {
-                        // Execution already exists — resume it for memoized replay
-                        rt.resume(run_id)
-                    }
-                    other => other,
+
+                // Check if execution already exists — if so, resume for memoized replay
+                let already_exists = exec_id.is_some()
+                    && rt.event_store().events(run_id).map(|e| !e.is_empty()).unwrap_or(false);
+
+                let outcome = if already_exists {
+                    rt.resume(run_id)
+                } else {
+                    rt.start_with_id(run_id, input)
                 };
 
                 match outcome {
