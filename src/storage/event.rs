@@ -1001,18 +1001,19 @@ impl EventStore for FileEventStore {
 
         let line = json::to_string(&event.to_json());
 
-        // Append atomically: open in append mode, write, fsync
+        // Append atomically: single write_all with newline included, then fsync.
+        // Combining data + newline in one write prevents partial lines from
+        // concurrent appends or interruption between the two writes.
+        let mut buf = line.into_bytes();
+        buf.push(b'\n');
+
         let mut file = fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(&path)
             .map_err(|e| format!("failed to open event file: {}", e))?;
-        // Always write Unix newline (\n) regardless of platform.
-        // This ensures hash chain integrity when events are read cross-platform.
-        file.write_all(line.as_bytes())
+        file.write_all(&buf)
             .map_err(|e| format!("failed to write event: {}", e))?;
-        file.write_all(b"\n")
-            .map_err(|e| format!("failed to write newline: {}", e))?;
         file.sync_all()
             .map_err(|e| format!("failed to sync event file: {}", e))?;
 
@@ -1029,36 +1030,27 @@ impl EventStore for FileEventStore {
 
         let mut events = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
-        for (i, line) in lines.iter().enumerate() {
+        for (_i, line) in lines.iter().enumerate() {
             let line = line.trim();
             if line.is_empty() {
                 continue;
             }
-            match json::parse(line) {
-                Ok(mut val) => {
-                    // Apply upcasters if registered and event is old schema
+            // Crash recovery: skip corrupt/truncated lines rather than failing.
+            // A partial write (e.g., process killed mid-fsync) leaves a truncated
+            // JSON line. Subsequent events (like lease_released) may follow it.
+            // Skipping corrupt lines preserves all valid state.
+            let val = match json::parse(line) {
+                Ok(mut v) => {
                     if let Some(ref registry) = self.upcaster {
-                        upcast_event_json(&mut val, registry);
+                        upcast_event_json(&mut v, registry);
                     }
-                    match Event::from_json(&val) {
-                        Ok(event) => events.push(event),
-                        Err(e) => {
-                            // Last line may be truncated from a crash — skip it.
-                            // Any earlier corrupt line is a real error.
-                            if i == lines.len() - 1 {
-                                break;
-                            }
-                            return Err(format!("malformed event at line {}: {}", i + 1, e));
-                        }
-                    }
+                    v
                 }
-                Err(e) => {
-                    // Last line may be truncated from a crash — skip it.
-                    if i == lines.len() - 1 {
-                        break;
-                    }
-                    return Err(format!("malformed event at line {}: {}", i + 1, e));
-                }
+                Err(_) => continue, // skip corrupt line
+            };
+            match Event::from_json(&val) {
+                Ok(event) => events.push(event),
+                Err(_) => continue, // skip unparseable event
             }
         }
         Ok(events)

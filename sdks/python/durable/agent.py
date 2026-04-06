@@ -151,6 +151,7 @@ class Agent:
         # Register callback handlers
         self._protocol.register_callback("execute_tool", self._handle_tool_callback)
         self._protocol.register_callback("chat_request", self._handle_llm_callback)
+        self._protocol.register_callback("check_contract", self._handle_contract_callback)
 
         # Start the reader thread
         self._protocol.start()
@@ -397,3 +398,37 @@ class Agent:
                 "message": str(e),
                 "retryable": True,
             }
+
+    def _handle_contract_callback(self, callback_id: str, data: dict) -> dict:
+        """Handle a check_contract callback from the runtime."""
+        contract_name = data.get("contract_name", "")
+        step_name = data.get("step_name", "")
+        arguments = data.get("arguments", {})
+
+        # Find the matching contract
+        for contract in self._contracts:
+            if contract.name == contract_name:
+                try:
+                    contract.check(step_name, arguments)
+                    return {
+                        "type": "contract_result",
+                        "callback_id": callback_id,
+                        "id": callback_id,
+                        "passed": True,
+                    }
+                except (ValueError, Exception) as e:
+                    return {
+                        "type": "contract_result",
+                        "callback_id": callback_id,
+                        "id": callback_id,
+                        "passed": False,
+                        "reason": str(e),
+                    }
+
+        # No matching contract — pass by default
+        return {
+            "type": "contract_result",
+            "callback_id": callback_id,
+            "id": callback_id,
+            "passed": True,
+        }

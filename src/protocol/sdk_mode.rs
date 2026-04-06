@@ -454,6 +454,9 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
                         if params != Value::Null {
                             def = def.with_parameters(params);
                         }
+                        if t.get("requires_confirmation").and_then(|v| v.as_bool()).unwrap_or(false) {
+                            def = def.with_confirmation();
+                        }
                         sdk_tools.register_definition(def);
                     }
                 }
@@ -477,9 +480,56 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
                 let llm = Arc::new(SdkLlmClient::new(writer.clone(), reader.clone()));
                 let tools = Arc::new(sdk_tools.into_registry());
 
-                let rt = AgentRuntime::with_event_store(
+                let mut rt = AgentRuntime::with_event_store(
                     config, storage, event_store, llm, tools,
                 );
+
+                // Wire up contracts: each contract name gets a callback to Python for checking
+                if let Some(contracts_arr) = val.get("contracts").and_then(|v| v.as_array()) {
+                    let mut contracts = Vec::new();
+                    for c in contracts_arr {
+                        if let Some(name) = c.as_str() {
+                            let w = writer.clone();
+                            let r = reader.clone();
+                            let contract_name = name.to_string();
+                            contracts.push(crate::agent::contract::Contract {
+                                name: contract_name.clone(),
+                                check: Arc::new(move |step_name: &str, args: &Value| {
+                                    let corr_id = Uuid::new_v4().to_hyphenated();
+                                    w.send_event(
+                                        "check_contract",
+                                        vec![
+                                            ("callback_id", json::json_str(&corr_id)),
+                                            ("contract_name", json::json_str(&contract_name)),
+                                            ("step_name", json::json_str(step_name)),
+                                            ("arguments", args.clone()),
+                                        ],
+                                    );
+                                    let response = r.wait_for_response(&corr_id)
+                                        .map_err(|e| format!("contract callback failed: {}", e))?;
+                                    let passed = response
+                                        .get("passed")
+                                        .and_then(|v| v.as_bool())
+                                        .unwrap_or(true);
+                                    if passed {
+                                        Ok(())
+                                    } else {
+                                        let reason = response
+                                            .get("reason")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("contract violated")
+                                            .to_string();
+                                        Err(reason)
+                                    }
+                                }),
+                            });
+                        }
+                    }
+                    if !contracts.is_empty() {
+                        rt.set_contracts(contracts);
+                    }
+                }
+
                 *runtime.lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(rt));
 
                 writer.send_event(
