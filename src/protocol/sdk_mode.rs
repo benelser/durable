@@ -420,6 +420,106 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
     let running: Arc<Mutex<std::collections::HashSet<String>>> =
         Arc::new(Mutex::new(std::collections::HashSet::new()));
 
+    // Event loop thread: watches for signals/timers and auto-resumes suspended agents.
+    // Scans every 200ms. Only resumes if the execution is not already running.
+    {
+        let registry = registry.clone();
+        let exec_agent_map = exec_agent_map.clone();
+        let running = running.clone();
+        let writer = writer.clone();
+
+        std::thread::Builder::new()
+            .name("durable-event-loop".to_string())
+            .spawn(move || {
+                loop {
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+
+                    // Snapshot the registry to avoid holding the lock during I/O
+                    let agents: Vec<(String, Arc<AgentRuntime>)> = {
+                        let reg = registry.lock().unwrap_or_else(|e| e.into_inner());
+                        reg.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+                    };
+
+                    for (agent_id, rt) in &agents {
+                        // List suspended executions for this agent
+                        let suspended = match rt.storage().list_executions(
+                            Some(crate::core::types::ExecutionStatus::Suspended),
+                        ) {
+                            Ok(execs) => execs,
+                            Err(_) => continue,
+                        };
+
+                        for meta in &suspended {
+                            let exec_id_str = meta.id.to_string();
+
+                            // Skip if already running
+                            if running.lock().unwrap_or_else(|e| e.into_inner()).contains(&exec_id_str) {
+                                continue;
+                            }
+
+                            // Check if the suspend condition is satisfied
+                            let should_resume = match &meta.suspend_reason {
+                                Some(crate::core::error::SuspendReason::WaitingForConfirmation {
+                                    confirmation_id, ..
+                                }) => {
+                                    rt.storage()
+                                        .peek_signal(meta.id, confirmation_id)
+                                        .ok()
+                                        .flatten()
+                                        .is_some()
+                                }
+                                Some(crate::core::error::SuspendReason::WaitingForSignal {
+                                    signal_name,
+                                }) => {
+                                    rt.storage()
+                                        .peek_signal(meta.id, signal_name)
+                                        .ok()
+                                        .flatten()
+                                        .is_some()
+                                }
+                                Some(crate::core::error::SuspendReason::WaitingForTimer {
+                                    fire_at_millis, ..
+                                }) => {
+                                    crate::core::time::now_millis() >= *fire_at_millis
+                                }
+                                _ => false,
+                            };
+
+                            if should_resume {
+                                // Mark as running
+                                if !running.lock().unwrap_or_else(|e| e.into_inner())
+                                    .insert(exec_id_str.clone())
+                                {
+                                    continue; // race: another thread got it
+                                }
+
+                                // Track exec -> agent mapping
+                                exec_agent_map.lock().unwrap_or_else(|e| e.into_inner())
+                                    .insert(exec_id_str.clone(), agent_id.clone());
+
+                                let rt = rt.clone();
+                                let w = writer.clone();
+                                let aid = agent_id.clone();
+                                let rid = exec_id_str.clone();
+                                let exec_id = meta.id;
+                                let running_ref = running.clone();
+
+                                let _ = std::thread::Builder::new()
+                                    .name(format!("auto-resume-{}", &rid[..8]))
+                                    .spawn(move || {
+                                        let outcome = rt.resume(exec_id);
+                                        emit_outcome(&w, &aid, &rid, outcome);
+                                        running_ref.lock().unwrap_or_else(|e| e.into_inner())
+                                            .remove(&rid);
+                                    });
+                            }
+                        }
+                    }
+                }
+            })
+            .expect("failed to spawn event loop thread");
+    }
+
     while let Some(val) = reader.recv_command() {
         let msg_type = val
             .get("type")
