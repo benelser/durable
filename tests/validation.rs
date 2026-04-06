@@ -167,7 +167,7 @@ fn test_replay_happy_path() {
     let exec_id = ExecutionId::new();
 
     // First run: execute steps normally
-    let ctx = ReplayContext::new(exec_id, store.clone(), None).unwrap();
+    let ctx = ReplayContext::new(exec_id, store.clone(), None, None).unwrap();
     let r1 = ctx.step("llm_call_0", &json_num(1.0), || Ok(json_str("hello")));
     assert!(r1.is_ok());
     let r2 = ctx.step("tool_search", &json_num(2.0), || Ok(json_str("results")));
@@ -175,7 +175,7 @@ fn test_replay_happy_path() {
     ctx.complete("done").unwrap();
 
     // Resume: steps should come from cache, not re-execute
-    let ctx2 = ReplayContext::resume(exec_id, store.clone(), None).unwrap();
+    let ctx2 = ReplayContext::resume(exec_id, store.clone(), None, None).unwrap();
     let mut executed = false;
     let r3 = ctx2.step("llm_call_0", &json_num(1.0), || {
         executed = true;
@@ -192,12 +192,12 @@ fn test_replay_step_name_mismatch_detected() {
     let exec_id = ExecutionId::new();
 
     // First run: step_0 is called "llm_call_0"
-    let ctx = ReplayContext::new(exec_id, store.clone(), None).unwrap();
+    let ctx = ReplayContext::new(exec_id, store.clone(), None, None).unwrap();
     ctx.step("llm_call_0", &json_num(1.0), || Ok(json_str("hello"))).unwrap();
     ctx.complete("done").unwrap();
 
     // Resume with DIFFERENT step name at step 0
-    let ctx2 = ReplayContext::resume(exec_id, store.clone(), None).unwrap();
+    let ctx2 = ReplayContext::resume(exec_id, store.clone(), None, None).unwrap();
     let result = ctx2.step("RENAMED_step", &json_num(1.0), || Ok(json_str("x")));
 
     match result {
@@ -215,13 +215,13 @@ fn test_replay_idempotent() {
     let store = Arc::new(InMemoryEventStore::new());
     let exec_id = ExecutionId::new();
 
-    let ctx = ReplayContext::new(exec_id, store.clone(), None).unwrap();
+    let ctx = ReplayContext::new(exec_id, store.clone(), None, None).unwrap();
     ctx.step("step_a", &json_num(1.0), || Ok(json_num(42.0))).unwrap();
     ctx.complete("done").unwrap();
 
     // Replay 3 times — same result every time
     for _ in 0..3 {
-        let ctx = ReplayContext::resume(exec_id, store.clone(), None).unwrap();
+        let ctx = ReplayContext::resume(exec_id, store.clone(), None, None).unwrap();
         let r = ctx.step("step_a", &json_num(1.0), || {
             panic!("should never execute");
         });
@@ -238,16 +238,16 @@ fn test_generation_increments_on_resume() {
     let store = Arc::new(InMemoryEventStore::new());
     let exec_id = ExecutionId::new();
 
-    let ctx1 = ReplayContext::new(exec_id, store.clone(), None).unwrap();
+    let ctx1 = ReplayContext::new(exec_id, store.clone(), None, None).unwrap();
     assert_eq!(ctx1.generation(), 1);
     ctx1.complete("done").unwrap();
     drop(ctx1); // Release lease before next resume
 
-    let ctx2 = ReplayContext::resume(exec_id, store.clone(), None).unwrap();
+    let ctx2 = ReplayContext::resume(exec_id, store.clone(), None, None).unwrap();
     assert_eq!(ctx2.generation(), 2);
     drop(ctx2); // Release lease before next resume
 
-    let ctx3 = ReplayContext::resume(exec_id, store.clone(), None).unwrap();
+    let ctx3 = ReplayContext::resume(exec_id, store.clone(), None, None).unwrap();
     assert_eq!(ctx3.generation(), 3);
 }
 
@@ -256,11 +256,11 @@ fn test_generation_in_event_log() {
     let store = Arc::new(InMemoryEventStore::new());
     let exec_id = ExecutionId::new();
 
-    let ctx = ReplayContext::new(exec_id, store.clone(), None).unwrap();
+    let ctx = ReplayContext::new(exec_id, store.clone(), None, None).unwrap();
     ctx.complete("done").unwrap();
 
-    let _ = ReplayContext::resume(exec_id, store.clone(), None).unwrap();
-    let _ = ReplayContext::resume(exec_id, store.clone(), None).unwrap();
+    let _ = ReplayContext::resume(exec_id, store.clone(), None, None).unwrap();
+    let _ = ReplayContext::resume(exec_id, store.clone(), None, None).unwrap();
 
     // Check event log contains generation events
     let events = store.events(exec_id).unwrap();
@@ -284,7 +284,7 @@ fn test_full_params_stored_in_events() {
     let exec_id = ExecutionId::new();
 
     let params = json_object(vec![("query", json_str("test")), ("limit", json_num(10.0))]);
-    let ctx = ReplayContext::new(exec_id, store.clone(), None).unwrap();
+    let ctx = ReplayContext::new(exec_id, store.clone(), None, None).unwrap();
     ctx.step("search", &params, || Ok(json_str("results"))).unwrap();
 
     // Verify the event contains full params
@@ -307,14 +307,14 @@ fn test_param_change_detected_on_replay() {
     let store = Arc::new(InMemoryEventStore::new());
     let exec_id = ExecutionId::new();
 
-    let ctx = ReplayContext::new(exec_id, store.clone(), None).unwrap();
+    let ctx = ReplayContext::new(exec_id, store.clone(), None, None).unwrap();
     ctx.step("search", &json_object(vec![("q", json_str("cats"))]), || {
         Ok(json_str("cat results"))
     }).unwrap();
     ctx.complete("done").unwrap();
 
     // Resume with DIFFERENT params — should detect non-determinism
-    let ctx2 = ReplayContext::resume(exec_id, store.clone(), None).unwrap();
+    let ctx2 = ReplayContext::resume(exec_id, store.clone(), None, None).unwrap();
     let result = ctx2.step("search", &json_object(vec![("q", json_str("dogs"))]), || {
         Ok(json_str("dog results"))
     });
@@ -438,11 +438,11 @@ fn test_step_fencing_in_replay_context() {
     let store = Arc::new(InMemoryEventStore::new());
     let exec_id = ExecutionId::new();
 
-    let ctx1 = ReplayContext::new(exec_id, store.clone(), None).unwrap();
+    let ctx1 = ReplayContext::new(exec_id, store.clone(), None, None).unwrap();
     ctx1.step("step_a", &json_num(1.0), || Ok(json_str("ok"))).unwrap();
     ctx1.complete("done").unwrap();
 
-    let ctx2 = ReplayContext::resume(exec_id, store.clone(), None).unwrap();
+    let ctx2 = ReplayContext::resume(exec_id, store.clone(), None, None).unwrap();
     assert_eq!(ctx2.generation(), 2);
 
     // Replay from cache
@@ -462,7 +462,7 @@ fn test_step_fencing_in_replay_context() {
 fn test_saga_compensation_reverse_order() {
     let store = Arc::new(InMemoryEventStore::new());
     let exec_id = ExecutionId::new();
-    let ctx = ReplayContext::new(exec_id, store.clone(), None).unwrap();
+    let ctx = ReplayContext::new(exec_id, store.clone(), None, None).unwrap();
 
     let order = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
 
@@ -498,7 +498,7 @@ fn test_saga_compensation_reverse_order() {
 fn test_saga_compensation_is_durable() {
     let store = Arc::new(InMemoryEventStore::new());
     let exec_id = ExecutionId::new();
-    let ctx = ReplayContext::new(exec_id, store.clone(), None).unwrap();
+    let ctx = ReplayContext::new(exec_id, store.clone(), None, None).unwrap();
 
     ctx.step_with_compensation(
         "charge", &json_num(50.0),
@@ -522,7 +522,7 @@ fn test_saga_compensation_is_durable() {
 fn test_saga_no_compensation_on_success() {
     let store = Arc::new(InMemoryEventStore::new());
     let exec_id = ExecutionId::new();
-    let ctx = ReplayContext::new(exec_id, store.clone(), None).unwrap();
+    let ctx = ReplayContext::new(exec_id, store.clone(), None, None).unwrap();
 
     ctx.step("step_a", &json_num(1.0), || Ok(json_str("ok"))).unwrap();
     let results = ctx.compensate().unwrap();
@@ -538,7 +538,7 @@ fn test_version_recorded_in_events() {
     let store = Arc::new(InMemoryEventStore::new());
     let exec_id = ExecutionId::new();
 
-    let ctx = ReplayContext::new_versioned(exec_id, store.clone(), "v2.1", None).unwrap();
+    let ctx = ReplayContext::new_versioned(exec_id, store.clone(), "v2.1", None, None).unwrap();
     assert_eq!(ctx.version(), Some("v2.1"));
 
     let state = ctx.current_state().unwrap();
@@ -550,15 +550,15 @@ fn test_version_mismatch_on_resume() {
     let store = Arc::new(InMemoryEventStore::new());
     let exec_id = ExecutionId::new();
 
-    let ctx = ReplayContext::new_versioned(exec_id, store.clone(), "v1.0", None).unwrap();
+    let ctx = ReplayContext::new_versioned(exec_id, store.clone(), "v1.0", None, None).unwrap();
     ctx.complete("done").unwrap();
 
     // Same version — succeeds
-    let result = ReplayContext::resume_versioned(exec_id, store.clone(), "v1.0", None);
+    let result = ReplayContext::resume_versioned(exec_id, store.clone(), "v1.0", None, None);
     assert!(result.is_ok());
 
     // Different version — fails
-    let result = ReplayContext::resume_versioned(exec_id, store.clone(), "v2.0", None);
+    let result = ReplayContext::resume_versioned(exec_id, store.clone(), "v2.0", None, None);
     match result {
         Err(e) => assert!(e.to_string().contains("version mismatch"), "got: {}", e),
         Ok(_) => panic!("expected version mismatch error"),
@@ -571,14 +571,14 @@ fn test_patching_api_get_version() {
     let exec_id = ExecutionId::new();
 
     // First run: records choice as max_supported
-    let ctx = ReplayContext::new(exec_id, store.clone(), None).unwrap();
+    let ctx = ReplayContext::new(exec_id, store.clone(), None, None).unwrap();
     let v = ctx.get_version("add-validation", 1, 2).unwrap();
     assert_eq!(v, 2);
     ctx.step("process", &json_num(1.0), || Ok(json_str("ok"))).unwrap();
     ctx.complete("done").unwrap();
 
     // Replay: returns previously recorded choice even if max changed
-    let ctx2 = ReplayContext::resume(exec_id, store.clone(), None).unwrap();
+    let ctx2 = ReplayContext::resume(exec_id, store.clone(), None, None).unwrap();
     let v2 = ctx2.get_version("add-validation", 1, 3).unwrap();
     assert_eq!(v2, 2); // sticky to first run
 }
@@ -613,7 +613,7 @@ fn test_complete_is_atomic_batch() {
     let store = Arc::new(InMemoryEventStore::new());
     let exec_id = ExecutionId::new();
 
-    let ctx = ReplayContext::new(exec_id, store.clone(), None).unwrap();
+    let ctx = ReplayContext::new(exec_id, store.clone(), None, None).unwrap();
     ctx.complete("final result").unwrap();
 
     let events = store.events(exec_id).unwrap();
@@ -788,7 +788,7 @@ fn test_snapshot_and_resume() {
     let exec_id = ExecutionId::new();
 
     // Run 5 steps
-    let ctx = ReplayContext::new(exec_id, store.clone(), None).unwrap();
+    let ctx = ReplayContext::new(exec_id, store.clone(), None, None).unwrap();
     for i in 0..5 {
         ctx.step("work", &json_num(i as f64), || Ok(json_str("done"))).unwrap();
     }
@@ -801,7 +801,7 @@ fn test_snapshot_and_resume() {
     assert!(snapshot.is_some(), "snapshot should exist");
 
     // Resume — should use snapshot (fast path)
-    let ctx2 = ReplayContext::resume(exec_id, store.clone(), None).unwrap();
+    let ctx2 = ReplayContext::resume(exec_id, store.clone(), None, None).unwrap();
     // Steps should be cached from snapshot
     for i in 0..5 {
         let result = ctx2.step("work", &json_num(i as f64), || {
@@ -819,7 +819,7 @@ fn test_snapshot_state_roundtrip() {
     let store = Arc::new(InMemoryEventStore::new());
     let exec_id = ExecutionId::new();
 
-    let ctx = ReplayContext::new(exec_id, store.clone(), None).unwrap();
+    let ctx = ReplayContext::new(exec_id, store.clone(), None, None).unwrap();
     ctx.step("step_a", &json_str("params_a"), || Ok(json_str("result_a"))).unwrap();
     ctx.step("step_b", &json_num(42.0), || Ok(json_num(84.0))).unwrap();
     ctx.set_tag("env", "test").unwrap();
@@ -842,7 +842,7 @@ fn test_snapshot_interval_skips_when_not_due() {
     let store = Arc::new(InMemoryEventStore::new());
     let exec_id = ExecutionId::new();
 
-    let ctx = ReplayContext::new(exec_id, store.clone(), None).unwrap();
+    let ctx = ReplayContext::new(exec_id, store.clone(), None, None).unwrap();
     ctx.step("a", &json_null(), || Ok(json_str("ok"))).unwrap();
     ctx.step("b", &json_null(), || Ok(json_str("ok"))).unwrap();
 
@@ -989,7 +989,7 @@ fn test_child_flow_start_and_complete() {
     let parent_id = ExecutionId::new();
     let child_id = ExecutionId::new();
 
-    let ctx = ReplayContext::new(parent_id, store.clone(), None).unwrap();
+    let ctx = ReplayContext::new(parent_id, store.clone(), None, None).unwrap();
 
     // Start a child flow
     let returned_id = ctx.start_child_flow(child_id, "child input").unwrap();
@@ -1027,7 +1027,7 @@ fn test_child_flow_await_after_complete() {
     let parent_id = ExecutionId::new();
     let child_id = ExecutionId::new();
 
-    let ctx = ReplayContext::new(parent_id, store.clone(), None).unwrap();
+    let ctx = ReplayContext::new(parent_id, store.clone(), None, None).unwrap();
     ctx.start_child_flow(child_id, "input").unwrap();
     ctx.complete_child_flow(child_id, "\"done\"").unwrap();
 
@@ -1044,7 +1044,7 @@ fn test_child_flow_survives_resume() {
 
     // First run: start child, complete child
     {
-        let ctx = ReplayContext::new(parent_id, store.clone(), None).unwrap();
+        let ctx = ReplayContext::new(parent_id, store.clone(), None, None).unwrap();
         ctx.start_child_flow(child_id, "input").unwrap();
         ctx.complete_child_flow(child_id, "\"child_done\"").unwrap();
         ctx.complete("parent_done").unwrap();
@@ -1052,7 +1052,7 @@ fn test_child_flow_survives_resume() {
 
     // Resume: child flow result should be available from history
     {
-        let ctx = ReplayContext::resume(parent_id, store.clone(), None).unwrap();
+        let ctx = ReplayContext::resume(parent_id, store.clone(), None, None).unwrap();
         // start_child_flow should be idempotent on replay
         let returned_id = ctx.start_child_flow(child_id, "input").unwrap();
         assert_eq!(returned_id, child_id);
@@ -1224,7 +1224,7 @@ fn test_deterministic_now_is_memoized() {
 
     // First execution: capture time
     let t1 = {
-        let ctx = ReplayContext::new(exec_id, store.clone(), None).unwrap();
+        let ctx = ReplayContext::new(exec_id, store.clone(), None, None).unwrap();
         let t = ctx.now().unwrap();
         ctx.complete("done").unwrap();
         t
@@ -1232,7 +1232,7 @@ fn test_deterministic_now_is_memoized() {
 
     // Replay: must return the SAME time, not current wall-clock
     let t2 = {
-        let ctx = ReplayContext::resume(exec_id, store.clone(), None).unwrap();
+        let ctx = ReplayContext::resume(exec_id, store.clone(), None, None).unwrap();
         ctx.now().unwrap()
     };
 
@@ -1246,7 +1246,7 @@ fn test_deterministic_random_is_memoized() {
 
     // First execution: generate random
     let r1 = {
-        let ctx = ReplayContext::new(exec_id, store.clone(), None).unwrap();
+        let ctx = ReplayContext::new(exec_id, store.clone(), None, None).unwrap();
         let r = ctx.random_u64().unwrap();
         ctx.complete("done").unwrap();
         r
@@ -1254,7 +1254,7 @@ fn test_deterministic_random_is_memoized() {
 
     // Replay: must return the SAME random value
     let r2 = {
-        let ctx = ReplayContext::resume(exec_id, store.clone(), None).unwrap();
+        let ctx = ReplayContext::resume(exec_id, store.clone(), None, None).unwrap();
         ctx.random_u64().unwrap()
     };
 
@@ -1270,19 +1270,19 @@ fn test_lease_prevents_concurrent_resume() {
     let store = Arc::new(InMemoryEventStore::new());
     let exec_id = ExecutionId::new();
 
-    let ctx1 = ReplayContext::new(exec_id, store.clone(), None).unwrap();
+    let ctx1 = ReplayContext::new(exec_id, store.clone(), None, None).unwrap();
     ctx1.complete("done").unwrap();
 
     // First resume acquires lease
-    let ctx2 = ReplayContext::resume(exec_id, store.clone(), None).unwrap();
+    let ctx2 = ReplayContext::resume(exec_id, store.clone(), None, None).unwrap();
 
     // Second resume while first lease is active should fail
-    let result = ReplayContext::resume(exec_id, store.clone(), None);
+    let result = ReplayContext::resume(exec_id, store.clone(), None, None);
     assert!(result.is_err(), "concurrent resume should fail while lease is active");
 
     // After dropping ctx2 (releases lease), resume should succeed
     drop(ctx2);
-    let ctx3 = ReplayContext::resume(exec_id, store.clone(), None);
+    let ctx3 = ReplayContext::resume(exec_id, store.clone(), None, None);
     assert!(ctx3.is_ok(), "resume should succeed after lease is released");
 }
 
@@ -1291,12 +1291,12 @@ fn test_lease_released_on_complete() {
     let store = Arc::new(InMemoryEventStore::new());
     let exec_id = ExecutionId::new();
 
-    let ctx1 = ReplayContext::new(exec_id, store.clone(), None).unwrap();
+    let ctx1 = ReplayContext::new(exec_id, store.clone(), None, None).unwrap();
     ctx1.complete("done").unwrap();
     drop(ctx1);
 
     // Resume, complete, and verify lease is released
-    let ctx2 = ReplayContext::resume(exec_id, store.clone(), None).unwrap();
+    let ctx2 = ReplayContext::resume(exec_id, store.clone(), None, None).unwrap();
     ctx2.complete("done again").unwrap();
     // Lease is released by complete() AND by Drop — both are safe
 
@@ -1316,7 +1316,7 @@ fn test_step_retry_override_never_retry() {
 
     let store = Arc::new(InMemoryEventStore::new());
     let exec_id = ExecutionId::new();
-    let ctx = ReplayContext::new(exec_id, store.clone(), None).unwrap();
+    let ctx = ReplayContext::new(exec_id, store.clone(), None, None).unwrap();
 
     let call_count = std::sync::atomic::AtomicU32::new(0);
     let result = ctx.step_with_retry(
@@ -1564,7 +1564,7 @@ fn test_prompt_hash_recorded_in_execution_created() {
     let exec_id = ExecutionId::new();
 
     let prompt = "You are a helpful assistant.";
-    let ctx = ReplayContext::new(exec_id, store.clone(), Some(prompt)).unwrap();
+    let ctx = ReplayContext::new(exec_id, store.clone(), Some(prompt), None).unwrap();
     ctx.complete("done").unwrap();
 
     // Verify the prompt hash and text are in the first event
@@ -1587,7 +1587,7 @@ fn test_prompt_hash_none_when_no_prompt() {
     let store = Arc::new(InMemoryEventStore::new());
     let exec_id = ExecutionId::new();
 
-    let ctx = ReplayContext::new(exec_id, store.clone(), None).unwrap();
+    let ctx = ReplayContext::new(exec_id, store.clone(), None, None).unwrap();
     ctx.complete("done").unwrap();
 
     let events = store.events(exec_id).unwrap();
@@ -1608,12 +1608,12 @@ fn test_resume_with_same_prompt_succeeds() {
     let prompt = "You are a code reviewer.";
 
     // Start execution with prompt
-    let ctx = ReplayContext::new(exec_id, store.clone(), Some(prompt)).unwrap();
+    let ctx = ReplayContext::new(exec_id, store.clone(), Some(prompt), None).unwrap();
     ctx.step("step_1", &json_num(1.0), || Ok(json_str("ok"))).unwrap();
     ctx.complete("done").unwrap();
 
     // Resume with the SAME prompt — should succeed
-    let ctx2 = ReplayContext::resume(exec_id, store.clone(), Some(prompt)).unwrap();
+    let ctx2 = ReplayContext::resume(exec_id, store.clone(), Some(prompt), None).unwrap();
     let result = ctx2.step("step_1", &json_num(1.0), || {
         panic!("should not re-execute — cached");
     });
@@ -1629,12 +1629,12 @@ fn test_resume_with_different_prompt_is_rejected() {
     let changed_prompt = "You are a malicious agent.";
 
     // Start execution with original prompt
-    let ctx = ReplayContext::new(exec_id, store.clone(), Some(original_prompt)).unwrap();
+    let ctx = ReplayContext::new(exec_id, store.clone(), Some(original_prompt), None).unwrap();
     ctx.step("step_1", &json_num(1.0), || Ok(json_str("ok"))).unwrap();
     ctx.complete("done").unwrap();
 
     // Resume with DIFFERENT prompt — should be rejected
-    let result = ReplayContext::resume(exec_id, store.clone(), Some(changed_prompt));
+    let result = ReplayContext::resume(exec_id, store.clone(), Some(changed_prompt), None);
     assert!(result.is_err(), "resume with different prompt must fail");
     let err_msg = match result {
         Err(e) => format!("{}", e),
@@ -1653,12 +1653,12 @@ fn test_resume_without_prompt_skips_check() {
     let exec_id = ExecutionId::new();
 
     // Start with a prompt
-    let ctx = ReplayContext::new(exec_id, store.clone(), Some("original")).unwrap();
+    let ctx = ReplayContext::new(exec_id, store.clone(), Some("original"), None).unwrap();
     ctx.step("s", &json_num(1.0), || Ok(json_str("x"))).unwrap();
     ctx.complete("done").unwrap();
 
     // Resume with None (e.g., coordinator that doesn't have prompt context) — allowed
-    let result = ReplayContext::resume(exec_id, store.clone(), None);
+    let result = ReplayContext::resume(exec_id, store.clone(), None, None);
     assert!(result.is_ok(), "resume with None prompt should skip drift check");
 }
 
@@ -1697,11 +1697,11 @@ fn test_prompt_drift_rejected_on_versioned_resume() {
     let original = "You are helpful.";
     let changed = "You are harmful.";
 
-    let ctx = ReplayContext::new_versioned(exec_id, store.clone(), "v1.0", Some(original)).unwrap();
+    let ctx = ReplayContext::new_versioned(exec_id, store.clone(), "v1.0", Some(original), None).unwrap();
     ctx.step("s", &json_num(1.0), || Ok(json_str("x"))).unwrap();
     ctx.complete("done").unwrap();
 
     // resume_versioned with correct version but wrong prompt
-    let result = ReplayContext::resume_versioned(exec_id, store.clone(), "v1.0", Some(changed));
+    let result = ReplayContext::resume_versioned(exec_id, store.clone(), "v1.0", Some(changed), None);
     assert!(result.is_err(), "versioned resume with different prompt must fail");
 }

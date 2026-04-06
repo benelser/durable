@@ -206,6 +206,7 @@ impl Worker {
                         // explicit human intervention — don't auto-resume.
                         Some(SuspendReason::ContractViolation { .. }) => false,
                         Some(SuspendReason::BudgetExhausted { .. }) => false,
+                        Some(SuspendReason::GracefulShutdown) => false,
                         None => false,
                     };
 

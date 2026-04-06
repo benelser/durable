@@ -109,6 +109,9 @@ pub enum SuspendReason {
         limit: String,
         used: String,
     },
+    /// Graceful shutdown requested. The agent should suspend at the next
+    /// step boundary so its state can be persisted before the process exits.
+    GracefulShutdown,
 }
 
 impl fmt::Display for DurableError {
@@ -272,6 +275,9 @@ impl crate::json::ToJson for SuspendReason {
                 ("limit", json_str(limit)),
                 ("used", json_str(used)),
             ]),
+            SuspendReason::GracefulShutdown => json_object(vec![
+                ("type", json_str("graceful_shutdown")),
+            ]),
         }
     }
 }
@@ -340,6 +346,7 @@ impl crate::json::FromJson for SuspendReason {
                 limit: val.get("limit").and_then(|v| v.as_str()).unwrap_or("").to_string(),
                 used: val.get("used").and_then(|v| v.as_str()).unwrap_or("").to_string(),
             }),
+            "graceful_shutdown" => Ok(SuspendReason::GracefulShutdown),
             other => Err(format!("unknown suspend reason type: {}", other)),
         }
     }

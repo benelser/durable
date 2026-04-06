@@ -61,7 +61,7 @@ pub struct ReplayContext {
 
 impl ReplayContext {
     /// Create a new context for a brand-new execution.
-    pub fn new(id: ExecutionId, event_store: Arc<dyn EventStore>, system_prompt: Option<&str>) -> DurableResult<Self> {
+    pub fn new(id: ExecutionId, event_store: Arc<dyn EventStore>, system_prompt: Option<&str>, cancel_token: Option<CancellationToken>) -> DurableResult<Self> {
         let prompt_hash = system_prompt.map(|p| fnv1a_hash(p.as_bytes()));
         event_store
             .append(id, EventType::ExecutionCreated {
@@ -85,7 +85,7 @@ impl ReplayContext {
             suspend_reason: Mutex::new(None),
             compensations: Mutex::new(Vec::new()),
             child_flows: Mutex::new(std::collections::BTreeMap::new()),
-            cancel_token: CancellationToken::new(),
+            cancel_token: cancel_token.unwrap_or_else(CancellationToken::new),
             budget_state: Mutex::new(crate::agent::budget::BudgetState::default()),
             last_step_was_replay: std::sync::atomic::AtomicBool::new(false),
         })
@@ -97,6 +97,7 @@ impl ReplayContext {
         event_store: Arc<dyn EventStore>,
         version: &str,
         system_prompt: Option<&str>,
+        cancel_token: Option<CancellationToken>,
     ) -> DurableResult<Self> {
         let prompt_hash = system_prompt.map(|p| fnv1a_hash(p.as_bytes()));
         event_store
@@ -124,7 +125,7 @@ impl ReplayContext {
             suspend_reason: Mutex::new(None),
             compensations: Mutex::new(Vec::new()),
             child_flows: Mutex::new(std::collections::BTreeMap::new()),
-            cancel_token: CancellationToken::new(),
+            cancel_token: cancel_token.unwrap_or_else(CancellationToken::new),
             budget_state: Mutex::new(crate::agent::budget::BudgetState::default()),
             last_step_was_replay: std::sync::atomic::AtomicBool::new(false),
         })
@@ -136,7 +137,7 @@ impl ReplayContext {
     ///
     /// Acquires a lease with TTL for mutual exclusion. If another worker
     /// holds an active lease, this call fails with `InvalidState`.
-    pub fn resume(id: ExecutionId, event_store: Arc<dyn EventStore>, system_prompt: Option<&str>) -> DurableResult<Self> {
+    pub fn resume(id: ExecutionId, event_store: Arc<dyn EventStore>, system_prompt: Option<&str>, cancel_token: Option<CancellationToken>) -> DurableResult<Self> {
         // Try snapshot-based fast resume first
         let snapshot = event_store
             .latest_snapshot(id)
@@ -208,7 +209,7 @@ impl ReplayContext {
             suspend_reason: Mutex::new(None),
             compensations: Mutex::new(Vec::new()),
             child_flows: Mutex::new(state.child_flows),
-            cancel_token: CancellationToken::new(),
+            cancel_token: cancel_token.unwrap_or_else(CancellationToken::new),
             budget_state: Mutex::new(state.budget_state),
             last_step_was_replay: std::sync::atomic::AtomicBool::new(false),
         })
@@ -220,6 +221,7 @@ impl ReplayContext {
         event_store: Arc<dyn EventStore>,
         expected_version: &str,
         system_prompt: Option<&str>,
+        cancel_token: Option<CancellationToken>,
     ) -> DurableResult<Self> {
         let history = event_store
             .events(id)
@@ -277,7 +279,7 @@ impl ReplayContext {
             suspend_reason: Mutex::new(None),
             compensations: Mutex::new(Vec::new()),
             child_flows: Mutex::new(state.child_flows),
-            cancel_token: CancellationToken::new(),
+            cancel_token: cancel_token.unwrap_or_else(CancellationToken::new),
             budget_state: Mutex::new(state.budget_state),
             last_step_was_replay: std::sync::atomic::AtomicBool::new(false),
         })

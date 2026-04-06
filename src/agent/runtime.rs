@@ -13,6 +13,7 @@ use crate::core::error::*;
 use crate::core::log::{LogLevel, Logger, NullLogger};
 use crate::core::retry::RetryPolicy;
 use crate::core::types::*;
+use crate::core::cancel::CancellationToken;
 use crate::execution::context::ExecutionContext;
 use crate::execution::replay::ReplayContext;
 use crate::json::{self, ToJson, Value};
@@ -97,6 +98,7 @@ pub struct AgentRuntime {
     contracts: Arc<Vec<crate::agent::contract::Contract>>,
     budget: Option<crate::agent::budget::Budget>,
     logger: Arc<dyn Logger>,
+    cancel_token: CancellationToken,
 }
 
 impl AgentRuntime {
@@ -119,6 +121,7 @@ impl AgentRuntime {
             contracts: Arc::new(Vec::new()),
             budget: None,
             logger: Arc::new(NullLogger),
+            cancel_token: CancellationToken::new(),
         }
     }
 
@@ -142,6 +145,7 @@ impl AgentRuntime {
             contracts: Arc::new(Vec::new()),
             budget: None,
             logger: Arc::new(NullLogger),
+            cancel_token: CancellationToken::new(),
         }
     }
 
@@ -206,6 +210,16 @@ impl AgentRuntime {
         &self.storage
     }
 
+    /// Get the cancellation token for cooperative shutdown.
+    pub fn cancel_token(&self) -> &CancellationToken {
+        &self.cancel_token
+    }
+
+    /// Set the cancellation token (used by sdk_mode to share one token across agents).
+    pub fn set_cancel_token(&mut self, token: CancellationToken) {
+        self.cancel_token = token;
+    }
+
     /// Get an inspector for querying execution state.
     pub fn inspector(&self) -> crate::observe::ExecutionInspector {
         crate::observe::ExecutionInspector::new(self.storage.clone())
@@ -226,7 +240,7 @@ impl AgentRuntime {
         }
 
         // Create the event-sourced replay context for durable step execution
-        let replay_ctx = match ReplayContext::new(exec_id, self.event_store.clone(), Some(&self.config.system_prompt)) {
+        let replay_ctx = match ReplayContext::new(exec_id, self.event_store.clone(), Some(&self.config.system_prompt), Some(self.cancel_token.clone())) {
             Ok(ctx) => ctx,
             Err(e) => return AgentOutcome::Error { error: e },
         };
@@ -257,7 +271,7 @@ impl AgentRuntime {
 
         // Resume the event-sourced replay context (loads history, increments generation)
         // Passes system_prompt for drift detection (Invariant I).
-        let replay_ctx = match ReplayContext::resume(exec_id, self.event_store.clone(), Some(&self.config.system_prompt)) {
+        let replay_ctx = match ReplayContext::resume(exec_id, self.event_store.clone(), Some(&self.config.system_prompt), Some(self.cancel_token.clone())) {
             Ok(ctx) => ctx,
             Err(e) => return AgentOutcome::Error { error: e },
         };
@@ -395,6 +409,13 @@ impl AgentRuntime {
         );
 
         for _iteration in 0..self.config.max_iterations {
+            // Cooperative cancellation: check between steps for graceful shutdown
+            if self.cancel_token.is_cancelled() {
+                return AgentOutcome::Suspended {
+                    reason: SuspendReason::GracefulShutdown,
+                };
+            }
+
             // Check execution timeout
             if let Some(timeout) = self.config.execution_timeout {
                 if loop_start.elapsed() >= timeout {
@@ -1044,6 +1065,13 @@ impl AgentRuntime {
             if let DurableError::Suspended(reason) = error {
                 return AgentOutcome::Suspended { reason };
             }
+        }
+
+        // Cancellation (from CancellationToken) → graceful shutdown suspension
+        if matches!(&error, DurableError::Cancelled) {
+            return AgentOutcome::Suspended {
+                reason: SuspendReason::GracefulShutdown,
+            };
         }
 
         // on_error hook: can override error handling
