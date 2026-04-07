@@ -17,7 +17,7 @@ Quick start::
         print(response)
 """
 
-from .agent import Agent
+from .agent import Agent, current_idempotency_key
 from .budget import Budget
 from .runtime import Runtime
 from .contract import Contract

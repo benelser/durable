@@ -69,6 +69,44 @@ class RuntimeNotFound(DurableError):
         self.searched = searched
 
 
+class PromptDriftError(DurableError):
+    """System prompt changed between execution and resume.
+
+    The system prompt recorded at execution creation doesn't match the
+    current prompt. This violates replay determinism — the agent would
+    make different decisions on resume.
+
+    Fix: use the same system prompt, or start a new execution.
+    """
+
+    def __init__(self, message: str):
+        super().__init__(
+            f"{message}\n\n"
+            "Fix: use the same system_prompt as the original execution, "
+            "or start a new execution with a new execution_id.",
+            retryable=False,
+        )
+
+
+class ToolDriftError(DurableError):
+    """Tool definitions changed between execution and resume.
+
+    The tools registered at execution creation don't match the current
+    tools. Renamed, added, or removed tools would cause the resumed
+    agent to fail at unpredictable points.
+
+    Fix: register the same tools, or start a new execution.
+    """
+
+    def __init__(self, message: str):
+        super().__init__(
+            f"{message}\n\n"
+            "Fix: register the same tools as the original execution, "
+            "or start a new execution with a new execution_id.",
+            retryable=False,
+        )
+
+
 class RuntimeCrashed(DurableError):
     """The durable-runtime binary exited unexpectedly.
 

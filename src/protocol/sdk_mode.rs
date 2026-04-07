@@ -292,6 +292,10 @@ impl SdkToolRegistry {
                             ("agent_id", json::json_str(&aid)),
                             ("tool_name", json::json_str(&tool_name)),
                             ("arguments", args.clone()),
+                            // Idempotency key: unique per tool invocation. Forward to
+                            // payment providers (Stripe, etc.) to prevent double-charges
+                            // if the process crashes between "tool executed" and "result persisted."
+                            ("idempotency_key", json::json_str(&correlation_id)),
                         ],
                     );
 
@@ -723,12 +727,36 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
                     }
                 }
 
+                // Structured logging via protocol (Python SDK captures these)
+                {
+                    let w = writer.clone();
+                    rt.set_logger(Arc::new(crate::core::log::ProtocolLogger::new(
+                        crate::core::log::LogLevel::Info,
+                        move |line| {
+                            w.send_event("log", vec![
+                                ("entry", json::json_str(line)),
+                            ]);
+                        },
+                    )));
+                }
+
                 // Share the process-wide cancellation token for graceful shutdown
                 rt.set_cancel_token(cancel_token.clone());
                 rt.set_agent_id(agent_id.clone());
 
+                let rt = Arc::new(rt);
                 registry.lock().unwrap_or_else(|e| e.into_inner())
-                    .insert(agent_id.clone(), Arc::new(rt));
+                    .insert(agent_id.clone(), rt.clone());
+
+                // Rebuild exec_agent_map for this agent's existing executions.
+                // This enables auto-resume across process restarts.
+                if let Ok(execs) = rt.storage().list_executions(None) {
+                    let mut eam = exec_agent_map.lock().unwrap_or_else(|e| e.into_inner());
+                    for meta in &execs {
+                        eam.entry(meta.id.to_string())
+                            .or_insert_with(|| agent_id.clone());
+                    }
+                }
 
                 writer.send_event(
                     "agent_created",

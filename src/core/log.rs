@@ -86,3 +86,44 @@ impl Default for StderrJsonLogger {
         Self::new(LogLevel::Info)
     }
 }
+
+/// Logger that sends structured log events through the SDK protocol pipe.
+/// Python SDK can capture these for application-level logging/metrics.
+pub struct ProtocolLogger {
+    min_level: LogLevel,
+    sender: Box<dyn Fn(&str) + Send + Sync>,
+}
+
+impl ProtocolLogger {
+    pub fn new<F>(min_level: LogLevel, sender: F) -> Self
+    where
+        F: Fn(&str) + Send + Sync + 'static,
+    {
+        Self {
+            min_level,
+            sender: Box::new(sender),
+        }
+    }
+}
+
+impl Logger for ProtocolLogger {
+    fn log(&self, level: LogLevel, fields: &[(&str, &str)], message: &str) {
+        if !self.is_enabled(level) {
+            return;
+        }
+        let mut entries: Vec<(&str, Value)> = vec![
+            ("ts", json::json_str(&now_iso8601())),
+            ("level", json::json_str(level.as_str())),
+            ("msg", json::json_str(message)),
+        ];
+        for (k, v) in fields {
+            entries.push((k, json::json_str(v)));
+        }
+        let line = json::to_string(&json::json_object(entries));
+        (self.sender)(&line);
+    }
+
+    fn min_level(&self) -> LogLevel {
+        self.min_level
+    }
+}

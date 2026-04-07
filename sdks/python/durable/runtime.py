@@ -56,6 +56,7 @@ class Runtime:
         self._started = False
         self._on_complete_cb: Optional[Callable] = None
         self._on_suspend_cb: Optional[Callable] = None
+        self._on_log_cb: Optional[Callable] = None
         self._agents: Dict[str, Any] = {}  # agent_id -> Agent
 
     def ping(self) -> dict:
@@ -95,8 +96,23 @@ class Runtime:
             # Old engine without hello support — proceed without capabilities
             self._capabilities = []
 
+        # Register global log event handler
+        self._protocol.register_callback("log", self._handle_log_event)
+
         self._started = True
         return self._protocol
+
+    def _handle_log_event(self, callback_id: str, data: dict) -> None:
+        """Handle a log event from the engine."""
+        if self._on_log_cb:
+            import json as _json
+            entry_str = data.get("entry", "{}")
+            try:
+                entry = _json.loads(entry_str)
+            except (ValueError, TypeError):
+                entry = {"msg": entry_str}
+            self._on_log_cb(entry)
+        return None  # no response needed
 
     def go(self, agent: Any, prompt: str, *, execution_id: Optional[str] = None) -> str:
         """Start an agent execution. Non-blocking. Returns execution_id.
@@ -163,6 +179,22 @@ class Runtime:
         Callback signature: ``(agent_id: str, execution_id: str, reason: dict) -> None``
         """
         self._on_suspend_cb = callback
+        return callback
+
+    def on_log(self, callback: Callable) -> Callable:
+        """Register a callback for structured log events from the engine.
+
+        Callback signature: ``(entry: dict) -> None``
+
+        The entry dict has fields: ts, level, msg, execution_id, step, etc.
+
+        Example::
+
+            @rt.on_log
+            def handle_log(entry):
+                print(f"[{entry['level']}] {entry['msg']}")
+        """
+        self._on_log_cb = callback
         return callback
 
     def _watch_execution(self, agent_id: str, exec_id: str) -> None:

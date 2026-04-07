@@ -22,11 +22,46 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, Union
 
 from .budget import Budget
 from .contract import Contract
-from .errors import DurableError
+from .errors import DurableError, PromptDriftError, ToolDriftError
 from .response import AgentResponse, ExecutionStatus, StreamChunk, SuspendReason
 from .tool import ToolDefinition, ToolWrapper
 from ._protocol import ProtocolClient, RuntimeCrashed
 from ._runtime import RuntimeManager
+
+
+# Thread-local context for the currently executing tool call.
+_current_idempotency_key: str = ""
+
+
+def _raise_classified_error(message: str, retryable: bool = False) -> None:
+    """Raise a specific error type based on the error message from the engine."""
+    msg_lower = message.lower()
+    if "prompt" in msg_lower and ("drift" in msg_lower or "changed" in msg_lower):
+        raise PromptDriftError(message)
+    if "tool" in msg_lower and ("drift" in msg_lower or "changed" in msg_lower):
+        raise ToolDriftError(message)
+    raise DurableError(message, retryable=retryable)
+
+
+def current_idempotency_key() -> str:
+    """Get the idempotency key for the currently executing tool call.
+
+    Forward this to payment providers (Stripe, etc.) to prevent
+    double-charges if the process crashes between tool execution
+    and result persistence.
+
+    Example::
+
+        from durable.agent import current_idempotency_key
+
+        @tool("charge", description="Charge payment")
+        def charge(amount: float) -> dict:
+            stripe.PaymentIntent.create(
+                amount=int(amount * 100),
+                idempotency_key=current_idempotency_key(),
+            )
+    """
+    return _current_idempotency_key
 
 
 class Agent:
@@ -274,7 +309,7 @@ class Agent:
                 )
 
             if event_type == "error":
-                raise DurableError(
+                _raise_classified_error(
                     event.get("message", "unknown error"),
                     retryable=event.get("retryable", False),
                 )
@@ -368,6 +403,11 @@ class Agent:
         """Handle an execute_tool callback from the runtime."""
         tool_name = data.get("tool_name", "")
         arguments = data.get("arguments", {})
+
+        # Make idempotency key available to tool functions via module-level context.
+        # Tools can import: from durable.agent import current_idempotency_key
+        import durable.agent as _agent_mod
+        _agent_mod._current_idempotency_key = data.get("idempotency_key", "")
 
         tool_wrapper = self._tools.get(tool_name)
         if tool_wrapper is None:
