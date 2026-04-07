@@ -655,8 +655,6 @@ def _fmt_size(n: int) -> str:
 
 # ---------------------------------------------------------------------------
 # Main
-# ---------------------------------------------------------------------------
-
 COMMANDS = {
     "status": cmd_status,
     "inspect": cmd_inspect,
@@ -689,15 +687,20 @@ def main() -> None:
         print(f"""
 {C.BOLD}durable{C.RESET} — operational tools for durable agent execution
 
-{C.BOLD}Usage:{C.RESET}
+{C.BOLD}Inspection:{C.RESET}
   durable status                    Show all executions
   durable inspect <id>              Detailed execution view
   durable steps <id>                Step-by-step timeline with timing
   durable cost [id]                 Cost breakdown (tokens, dollars)
-  durable compact                   Compact old event logs
   durable replay <id>               Animated step-by-step replay
   durable export <id> [-o file]     Export execution as JSON
+
+{C.BOLD}Maintenance:{C.RESET}
+  durable compact                   Compact old event logs
   durable health                    Storage health check
+
+{C.BOLD}Scaffolding:{C.RESET}
+  durable-runtime init <name>       Create a new project (any language)
 
 {C.BOLD}Options:{C.RESET}
   --data-dir <path>                 Data directory (default: ./durable-data)
