@@ -29,8 +29,12 @@ from ._protocol import ProtocolClient, RuntimeCrashed
 from ._runtime import RuntimeManager
 
 
-# Thread-local context for the currently executing tool call.
-_current_idempotency_key: str = ""
+import threading as _threading
+
+# Thread-local storage for the currently executing tool call.
+# Each callback thread gets its own idempotency key — safe for
+# concurrent tool execution across multiple agents.
+_tool_context = _threading.local()
 
 
 def _raise_classified_error(message: str, retryable: bool = False) -> None:
@@ -61,7 +65,7 @@ def current_idempotency_key() -> str:
                 idempotency_key=current_idempotency_key(),
             )
     """
-    return _current_idempotency_key
+    return getattr(_tool_context, "idempotency_key", "")
 
 
 class Agent:
@@ -319,9 +323,17 @@ class Agent:
     def stream(self, prompt: str) -> Iterator[StreamChunk]:
         """Stream the agent's response token by token."""
         protocol = self._ensure_started()
-        protocol.send_fire_and_forget("run_agent", input=prompt, stream=True)
+        kwargs: Dict[str, Any] = {"input": prompt, "stream": True}
+        if self._agent_id:
+            kwargs["agent_id"] = self._agent_id
+        protocol.send_fire_and_forget("run_agent", **kwargs)
 
-        for event in protocol.collect_stream("completed", "suspended", "error"):
+        if self._agent_id:
+            stream_iter = protocol.collect_agent_stream(self._agent_id, "completed", "suspended", "error")
+        else:
+            stream_iter = protocol.collect_stream("completed", "suspended", "error")
+
+        for event in stream_iter:
             event_type = event.get("type", "")
 
             if event_type == "text_delta":
@@ -404,10 +416,9 @@ class Agent:
         tool_name = data.get("tool_name", "")
         arguments = data.get("arguments", {})
 
-        # Make idempotency key available to tool functions via module-level context.
+        # Make idempotency key available to tool functions via thread-local storage.
         # Tools can import: from durable.agent import current_idempotency_key
-        import durable.agent as _agent_mod
-        _agent_mod._current_idempotency_key = data.get("idempotency_key", "")
+        _tool_context.idempotency_key = data.get("idempotency_key", "")
 
         tool_wrapper = self._tools.get(tool_name)
         if tool_wrapper is None:

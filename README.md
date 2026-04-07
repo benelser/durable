@@ -116,18 +116,23 @@ response = agent.resume(execution_id)
 # Email sends, order completes
 ```
 
-### Multi-Agent Coordination
+### Multi-Agent Runtime
 
 ```python
-from durable import AgentCoordinator
+from durable import Runtime, Agent
 
-coord = AgentCoordinator(event_store, storage)
-coord.add_worker("research", [], lambda deps: research_task())
-coord.add_worker("implement", ["research"], lambda deps: implement(deps["research"]))
-coord.add_worker("verify", ["implement"], lambda deps: verify(deps["implement"]))
+rt = Runtime("./data")
+agent_a = Agent("./data", runtime=rt, agent_id="research-bot", ...)
+agent_b = Agent("./data", runtime=rt, agent_id="writer-bot", ...)
 
-results = coord.execute(execution_id)
-# On crash: completed workers skip, incomplete workers re-run
+# Non-blocking spawn — agents run as durable threads
+exec_a = rt.go(agent_a, "Research the topic")
+exec_b = rt.go(agent_b, "Write the report")
+
+# Lifecycle callbacks
+@rt.on_complete
+def done(agent_id, exec_id, response):
+    print(f"{agent_id} finished: {response[:50]}")
 ```
 
 ### Streaming
@@ -169,9 +174,15 @@ def my_llm(messages, tools=None, model=None):
 agent.set_llm(my_llm)
 ```
 
-## Framework Integrations
+## Framework Integrations (experimental)
 
-Add durability to your existing agents — one line, any framework.
+Basic checkpoint persistence for existing frameworks. These use a
+Python file backend — not the Rust engine. They provide task-level
+crash recovery (resume from last completed task) but NOT the step-level
+exactly-once guarantees of native Durable agents.
+
+For full durable execution guarantees (exactly-once tool calls, WAL
+integrity, replay determinism), use the native `Agent` + `Runtime` API.
 
 ### LangChain / LangGraph
 
@@ -181,7 +192,7 @@ from durable.integrations.langchain import DurableCheckpointer
 
 compiled = graph.compile(checkpointer=DurableCheckpointer("./data"))
 
-# Crash recovery is automatic — same thread_id resumes from checkpoint
+# Same thread_id resumes from last checkpoint
 result = compiled.invoke(
     {"messages": [HumanMessage(content="Process order #123")]},
     config={"configurable": {"thread_id": "order-123"}}
@@ -239,22 +250,25 @@ The Rust engine is a single binary managed as an invisible subprocess. The Pytho
 
 ### Authentication
 
-The runtime binary supports token-based authentication. Unauthenticated commands are rejected.
+The runtime binary supports token-based authentication via CLI flag:
 
 ```bash
-# Binary with auth
 durable-runtime --sdk-mode --auth-token my-secret
-
-# Or via environment variable
-export DURABLE_AUTH_TOKEN=my-secret
-durable-runtime --sdk-mode
 ```
 
-The Python SDK passes the token automatically when `DURABLE_AUTH_TOKEN` is set.
+> **Note:** The Python SDK does not yet pass auth tokens automatically.
+> This is planned for a future release.
 
 ### Event Log Compaction
 
-Long-running agents accumulate thousands of events. Compaction snapshots the current state and truncates old events, bounding file size and resume latency.
+Long-running agents accumulate events. The Rust engine takes periodic
+snapshots for fast resume — on resume, it loads the latest snapshot and
+replays only subsequent events instead of replaying the full history.
+
+Default interval: every 50 steps. Most agents complete in under 50 steps
+and never snapshot. Long-running agents (100+ steps) get snapshots that
+keep resume latency under 5ms regardless of history length. Configurable
+via `AgentConfig.snapshot_interval` (set to 0 to disable).
 
 ```python
 # Compaction happens automatically via snapshot_interval (default: every 50 steps)
@@ -298,6 +312,51 @@ The runtime enforces seven invariants from the [durable execution specification]
 | Mutual Exclusion | One worker per execution at a time (lease-based fencing) |
 | Error Classification | Every error classified as retry/fail/escalate |
 | Configuration Completeness | Unconfigured runtime cannot be constructed |
+
+## How Durable Compares
+
+### vs LangGraph
+
+LangGraph has checkpointing — you can save and restore graph state via
+a checkpointer backend (memory, SQLite, Postgres). This gives you:
+- Resume a conversation from where it left off
+- Branch and replay from any checkpoint
+- Human-in-the-loop interrupts via `interrupt_before`/`interrupt_after`
+
+What LangGraph checkpointing does NOT give you:
+- **Exactly-once tool execution.** LangGraph's standard `StateGraph`
+  checkpoints at node boundaries, not within nodes. If a node calls a
+  tool and the process crashes after the tool executes but before the
+  next checkpoint is saved, the tool re-executes on resume. LangGraph's
+  Functional API offers a `@task` decorator designed to cache sub-node
+  results, but it only works in the Functional API (not `StateGraph` or
+  `create_react_agent`), has known deployment issues on the LangGraph
+  API server, and LangGraph's own docs recommend designing all side
+  effects to be idempotent "in case of re-execution."
+- **Replay determinism enforcement.** LangGraph doesn't detect if your
+  tools or prompts changed between checkpoint and resume.
+
+Durable provides step-level memoization: every step (LLM call and tool
+call) is individually persisted to an append-only event log BEFORE the
+next step begins. The event log is the source of truth, not in-memory
+state. Prompt drift and tool drift are detected and rejected on resume.
+
+### vs Temporal
+
+Temporal is the gold standard for durable execution. It provides
+everything Durable does and more: multi-machine clusters, workflow
+versioning, schedules, visibility UI, and battle-tested production
+hardening.
+
+What Temporal requires that Durable doesn't:
+- A Temporal Server cluster (3+ nodes for production)
+- Worker processes separate from your application
+- Workflow code written in Temporal's SDK patterns
+- Infrastructure team to manage the cluster
+
+Durable is for teams that want durable execution guarantees without
+operating distributed infrastructure. One process, one binary, files
+on disk. If you outgrow single-machine, Temporal is the right next step.
 
 ## Zero Dependencies
 
