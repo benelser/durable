@@ -1,0 +1,37 @@
+[package]
+name = "durable-runtime"
+binary = "durable"
+description = "The SQLite of durable agent execution â crash-recoverable AI agents with exactly-once semantics. Zero dependencies."
+repository = "https://github.com/benelser/durable"
+license = "MIT"
+
+[targets]
+platforms = [
+  "aarch64-apple-darwin",
+  "x86_64-apple-darwin",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-unknown-linux-gnu",
+  "x86_64-unknown-linux-musl",
+  "x86_64-pc-windows-msvc",
+]
+
+[distribute.github]
+release = true
+
+[distribute.pypi]
+package_name = "durable-runtime"
+
+[distribute.npm]
+scope = "@benelser"
+
+[distribute.homebrew]
+tap = "benelser/homebrew-durable-runtime"
+
+[distribute.scoop]
+bucket = "benelser/scoop-durable-runtime"
+
+[distribute.cargo]
+crate_name = "durable-runtime"
+
+[distribute.install_script]
+enabled = true
