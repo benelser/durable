@@ -275,7 +275,7 @@ jobs:
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.TAP_GITHUB_TOKEN }}
-          repository: benelser/homebrew-durable-runtime
+          repository: benelser/homebrew-durable
           event-type: update-formula
           client-payload: '{"version": "${{ github.ref_name }}"}'
 
@@ -288,6 +288,6 @@ jobs:
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.BUCKET_GITHUB_TOKEN }}
-          repository: benelser/scoop-durable-runtime
+          repository: benelser/scoop-durable
           event-type: update-manifest
           client-payload: '{"version": "${{ github.ref_name }}"}'

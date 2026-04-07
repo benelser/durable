@@ -19,10 +19,18 @@ metadata:
 
 ## Pre-checks
 
-1. Verify `Cargo.toml` exists
-2. Verify `bincast.toml` does NOT exist
-3. Verify git remote exists: `git remote -v`
-4. Verify bincast is installed: `which bincast && bincast version`
+Use your file reading tools (Read, Glob) for file checks — do NOT use shell `test -f` commands as security hooks may block them.
+
+1. Read `Cargo.toml` — verify it exists and has `[package]` section
+2. Check that `bincast.toml` does NOT exist (use Glob or ls)
+3. Check git remote: `git remote -v`
+4. Check bincast binary: `bincast version` (if command fails, install it first — see `../bincast-shared/SKILL.md`)
+
+If bincast is not installed, install it:
+```bash
+brew install benelser/bincast/bincast
+```
+Do NOT build from apm_modules source — always install from a package manager.
 
 ## Agent Flow (non-interactive)
 
@@ -90,10 +98,11 @@ The `!` prefix runs it in the current session. The wizard will ask for profile a
 
 1. Run `bincast check` to validate
 2. Review generated files: `cat bincast.toml`
-3. Set secrets if prompted (see `../bincast-shared/SKILL.md` for secret setup)
+3. **Set up secrets** — invoke `../bincast-setup-secrets/SKILL.md` to create tokens and set GitHub Actions secrets. This is the critical next step before the first release.
 
 ## See Also
 
+- `../bincast-setup-secrets/SKILL.md` — create tokens and set secrets (browser-assisted)
 - `../bincast-shared/SKILL.md` — installation and config reference
 - `../bincast-release/SKILL.md` — releasing after setup
 

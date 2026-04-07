@@ -25,10 +25,10 @@ package_name = "durable-runtime"
 scope = "@benelser"
 
 [distribute.homebrew]
-tap = "benelser/homebrew-durable-runtime"
+tap = "benelser/homebrew-durable"
 
 [distribute.scoop]
-bucket = "benelser/scoop-durable-runtime"
+bucket = "benelser/scoop-durable"
 
 [distribute.cargo]
 crate_name = "durable-runtime"
