@@ -532,7 +532,48 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
             .expect("failed to spawn event loop thread");
     }
 
-    while let Some(val) = reader.recv_command() {
+    // Hello/version negotiation (optional — backward compatible).
+    // If the first message is "hello", respond with capabilities.
+    // If not, treat it as a regular command (old SDK, no hello).
+    let mut first_command: Option<Value> = None;
+    if let Some(val) = reader.recv_command() {
+        let msg_type = val.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        if msg_type == "hello" {
+            let sdk_proto = val.get("protocol_version").and_then(|v| v.as_str()).unwrap_or("1");
+            let engine_proto = crate::protocol::PROTOCOL_VERSION;
+            // Major version must match
+            let sdk_major = sdk_proto.split('.').next().unwrap_or("1");
+            let engine_major = engine_proto.split('.').next().unwrap_or("1");
+            if sdk_major != engine_major {
+                writer.send_event("error", vec![
+                    ("message", json::json_str(&format!(
+                        "incompatible protocol: SDK v{}, engine v{}", sdk_proto, engine_proto
+                    ))),
+                    ("retryable", json::json_bool(false)),
+                ]);
+                return;
+            }
+            writer.send_event("hello_ack", vec![
+                ("engine_version", json::json_str(env!("CARGO_PKG_VERSION"))),
+                ("protocol_version", json::json_str(engine_proto)),
+                ("capabilities", json::json_array(vec![
+                    json::json_str("multi_agent"),
+                    json::json_str("graceful_shutdown"),
+                    json::json_str("tool_drift_detection"),
+                    json::json_str("prompt_drift_detection"),
+                    json::json_str("health_check"),
+                    json::json_str("auto_resume"),
+                ])),
+            ]);
+        } else {
+            // Not a hello — treat as first command
+            first_command = Some(val);
+        }
+    }
+
+    // Process first_command if it wasn't a hello, then enter main loop
+    let command_iter = first_command.into_iter().chain(std::iter::from_fn(|| reader.recv_command()));
+    for val in command_iter {
         let msg_type = val
             .get("type")
             .and_then(|v| v.as_str())
@@ -924,6 +965,40 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
                     let data = val.get("data").cloned().unwrap_or(Value::Null);
                     let _ = rt.signal(exec_id, signal_name, data);
                 }
+            }
+
+            "ping" => {
+                let reg_size = registry.lock().unwrap_or_else(|e| e.into_inner()).len();
+                let active = running.lock().unwrap_or_else(|e| e.into_inner()).len();
+                writer.send_event("pong", vec![
+                    ("engine_version", json::json_str(env!("CARGO_PKG_VERSION"))),
+                    ("protocol_version", json::json_str(crate::protocol::PROTOCOL_VERSION)),
+                    ("agents_registered", json::json_num(reg_size as f64)),
+                    ("agents_active", json::json_num(active as f64)),
+                ]);
+            }
+
+            "status" => {
+                let reg = registry.lock().unwrap_or_else(|e| e.into_inner());
+                let r = running.lock().unwrap_or_else(|e| e.into_inner());
+                let eam = exec_agent_map.lock().unwrap_or_else(|e| e.into_inner());
+                let mut agents = Vec::new();
+                for (aid, rt) in reg.iter() {
+                    let suspended = rt.storage()
+                        .list_executions(Some(crate::core::types::ExecutionStatus::Suspended))
+                        .map(|v| v.len()).unwrap_or(0);
+                    let active = r.keys()
+                        .filter(|k| eam.get(*k).map(|a| a == aid).unwrap_or(false))
+                        .count();
+                    agents.push(json::json_object(vec![
+                        ("agent_id", json::json_str(aid)),
+                        ("active_executions", json::json_num(active as f64)),
+                        ("suspended_executions", json::json_num(suspended as f64)),
+                    ]));
+                }
+                writer.send_event("status_response", vec![
+                    ("agents", json::json_array(agents)),
+                ]);
             }
 
             "shutdown" => {

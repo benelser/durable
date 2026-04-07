@@ -58,6 +58,18 @@ class Runtime:
         self._on_suspend_cb: Optional[Callable] = None
         self._agents: Dict[str, Any] = {}  # agent_id -> Agent
 
+    def ping(self) -> dict:
+        """Health check. Returns engine version, protocol version, agent counts."""
+        protocol = self._ensure_protocol()
+        protocol.send_fire_and_forget("ping")
+        return protocol.wait_for_event("pong", timeout=5)
+
+    def status(self) -> dict:
+        """Get per-agent status breakdown."""
+        protocol = self._ensure_protocol()
+        protocol.send_fire_and_forget("status")
+        return protocol.wait_for_event("status_response", timeout=5)
+
     def _ensure_protocol(self) -> ProtocolClient:
         """Start the shared subprocess if needed. Returns the ProtocolClient."""
         if self._protocol and self._started:
@@ -66,6 +78,23 @@ class Runtime:
         process = self._runtime_mgr.start()
         self._protocol = ProtocolClient(process)
         self._protocol.start()
+
+        # Hello/version negotiation
+        self._protocol.send_fire_and_forget(
+            "hello",
+            sdk_name="python",
+            sdk_version="0.1.0",
+            protocol_version="1",
+        )
+        try:
+            ack = self._protocol.wait_for_event("hello_ack", "error", timeout=5)
+            if ack.get("type") == "error":
+                raise DurableError(ack.get("message", "version negotiation failed"))
+            self._capabilities = ack.get("capabilities", [])
+        except TimeoutError:
+            # Old engine without hello support — proceed without capabilities
+            self._capabilities = []
+
         self._started = True
         return self._protocol
 
