@@ -9,8 +9,8 @@ keywords = ["agent", "durable", "llm", "execution", "replay"]
 categories = ["development-tools", "asynchronous"]
 
 [[bin]]
-name = "durable-runtime"
-path = "src/bin/durable_runtime.rs"
+name = "durable"
+path = "src/bin/durable.rs"
 
 [dependencies]
 

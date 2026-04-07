@@ -21,7 +21,8 @@ class RuntimeManager:
     4. On PATH
     """
 
-    BINARY_NAME = "durable-runtime"
+    BINARY_NAME = "durable"
+    BINARY_NAME_LEGACY = "durable-runtime"  # backward compat
 
     def __init__(self) -> None:
         self._process: Optional[subprocess.Popen] = None
@@ -65,14 +66,15 @@ class RuntimeManager:
                 self._binary_path = candidate_debug
                 return candidate_debug
 
-        # 4. On PATH
+        # 4. On PATH (try new name, then legacy name)
         import shutil
 
-        on_path = shutil.which(self.BINARY_NAME)
-        searched.append("$PATH")
-        if on_path:
-            self._binary_path = Path(on_path)
-            return self._binary_path
+        for name in (self.BINARY_NAME, self.BINARY_NAME_LEGACY):
+            on_path = shutil.which(name)
+            searched.append(f"$PATH ({name})")
+            if on_path:
+                self._binary_path = Path(on_path)
+                return self._binary_path
 
         raise RuntimeNotFound(searched)
 
@@ -83,7 +85,7 @@ class RuntimeManager:
 
         binary = self.ensure_binary()
         self._process = subprocess.Popen(
-            [str(binary), "--sdk-mode"],
+            [str(binary), "runtime"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
