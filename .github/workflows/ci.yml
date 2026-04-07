@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test
+      - run: cargo build --release
+
+  python:
+    needs: rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build Rust binary
+        run: cargo build --release
+
+      - name: Install pytest
+        run: pip install pytest
+
+      - name: Run Python tests
+        working-directory: sdks/python
+        run: python -m pytest tests/test_sdk.py tests/test_runtime.py -v
+        env:
+          PYTHONPATH: .
+
+  cli:
+    needs: rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release
+      - run: ./target/release/durable version
+      - run: ./target/release/durable help
+      - run: |
+          rm -rf /tmp/test-init
+          ./target/release/durable init /tmp/test-init --lang python
+          test -f /tmp/test-init/agent.py

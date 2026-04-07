@@ -3,7 +3,7 @@ requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "durable-runtime"
+name = "durable"
 version = "0.1.0"
 description = "The SQLite of durable agent execution — crash-recoverable AI agents with exactly-once semantics"
 license = {text = "MIT"}

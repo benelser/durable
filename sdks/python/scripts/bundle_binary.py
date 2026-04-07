@@ -26,12 +26,12 @@ BIN_DIR = SDK_DIR / "durable" / "_bin"
 def find_binary() -> Path:
     """Find the compiled Rust binary."""
     # Release build
-    release = RUST_DIR / "target" / "release" / "durable-runtime"
+    release = RUST_DIR / "target" / "release" / "durable"
     if release.exists():
         return release
 
     # Debug build
-    debug = RUST_DIR / "target" / "debug" / "durable-runtime"
+    debug = RUST_DIR / "target" / "debug" / "durable"
     if debug.exists():
         return debug
 
@@ -44,7 +44,7 @@ def bundle():
     binary = find_binary()
     BIN_DIR.mkdir(parents=True, exist_ok=True)
 
-    dest = BIN_DIR / "durable-runtime"
+    dest = BIN_DIR / "durable"
     shutil.copy2(binary, dest)
 
     # Make executable

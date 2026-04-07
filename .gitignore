@@ -41,6 +41,9 @@ aws-credentials
 # Reference / research repos (not part of Durable)
 /source/
 
+# Bundled binaries (built by CI, not committed)
+sdks/python/durable/_bin/
+
 # Test artifacts
 .pytest_cache/
 htmlcov/
