@@ -1,6 +1,36 @@
-# Durable Runtime
+# Durable
 
-The SQLite of durable agent execution. Zero dependencies. Crash-recoverable. Exactly-once semantics.
+The SQLite of durable agent execution. Crash-recoverable AI agents with exactly-once semantics.
+
+## Install
+
+### Python
+
+```bash
+pip install durable-runtime        # pip
+uv add durable-runtime             # uv
+poetry add durable-runtime         # poetry
+```
+
+### TypeScript (coming soon)
+
+```bash
+npm install durable-runtime        # npm
+bun add durable-runtime            # bun
+pnpm add durable-runtime           # pnpm
+```
+
+Set your LLM provider key:
+
+```bash
+export OPENAI_API_KEY=sk-...
+# or
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+## Quick Start
+
+### Python
 
 ```python
 from durable import Agent, tool
@@ -10,139 +40,184 @@ from durable.providers import OpenAI
 def get_weather(location: str) -> dict:
     return {"temp": 72, "conditions": "sunny", "location": location}
 
-with Agent("./my-agent") as agent:
+with Agent("./data") as agent:
     agent.add_tool(get_weather)
     agent.set_llm(OpenAI())
     response = agent.run("What's the weather in San Francisco?")
     print(response)
 ```
 
+### TypeScript (coming soon)
+
+```typescript
+import { Agent, tool } from "durable-runtime";
+import { OpenAI } from "durable-runtime/providers";
+
+const getWeather = tool("get_weather", "Get weather for a location",
+  async (location: string) => ({ temp: 72, conditions: "sunny", location })
+);
+
+const agent = new Agent("./data", {
+  systemPrompt: "You are a helpful assistant.",
+  llm: new OpenAI(),
+  tools: [getWeather],
+});
+
+const response = await agent.run("What's the weather in San Francisco?");
+console.log(response.text);
+```
+
 ## What It Does
 
-Every LLM call and tool execution is a **durable step**. Results are memoized in an append-only event log. If the process crashes — between the payment charge and the confirmation email, between retry 3 and retry 4, between hour 1 and hour 47 of a long-running workflow — execution resumes exactly where it left off. No duplicate charges. No lost state. No re-execution of completed steps.
+Every LLM call and tool execution is a **durable step**. Results are persisted to an append-only event log before the next step begins. If the process crashes — between the payment charge and the confirmation email, between retry 3 and retry 4, between hour 1 and hour 47 — execution resumes exactly where it left off.
 
-## Install
+```
+Without durable:
+  charge_payment()  →  crash  →  restart  →  charge_payment() again
+  Result: customer charged twice ($299.94)
 
-```bash
-pip install durable-runtime
+With durable:
+  charge_payment()  →  crash  →  restart  →  cached result returned
+  Result: customer charged once ($149.97)
 ```
 
-## Quick Start
-
-### Ephemeral (in-memory, for testing)
+## Crash Recovery
 
 ```python
-from durable import Agent, tool
-from durable.providers import OpenAI
+# First run — everything executes and is persisted
+response = agent.run("Process order #123")
+execution_id = response.execution_id
 
-@tool("greet", description="Greet someone by name")
-def greet(name: str) -> dict:
-    return {"message": f"Hello, {name}!"}
-
-with Agent("./data") as agent:
-    agent.add_tool(greet)
-    agent.set_llm(OpenAI())  # reads OPENAI_API_KEY from env
-    print(agent.run("Greet Alice"))
+# Process crashes. On restart, pass the same execution_id:
+response = agent.run("Process order #123", execution_id=execution_id)
+# All completed steps return cached results. No re-execution.
 ```
 
-### With Anthropic
+## Human-in-the-Loop
 
-```python
-from durable.providers import Anthropic
-
-agent.set_llm(Anthropic())  # reads ANTHROPIC_API_KEY from env
-agent.set_llm(Anthropic(model="claude-opus-4-20250514"))
-```
-
-### Budget Limits
-
-```python
-from durable import Budget
-
-with Agent("./data") as agent:
-    agent.budget = Budget(max_dollars=2.00, max_llm_calls=10)
-    agent.set_llm(OpenAI())
-    response = agent.run("Process this batch")
-
-    if response.is_suspended:
-        print(f"Budget exhausted: {response.suspend_reason}")
-        # Approve more budget and resume
-```
-
-### Agent Contracts
-
-```python
-with Agent("./data") as agent:
-    @agent.contract("spending-limit")
-    def check_spending(step_name, args):
-        if args.get("amount", 0) > 100:
-            raise ValueError("Charges over $100 need approval")
-
-    agent.set_llm(OpenAI())
-    agent.add_tool(charge_payment)
-    response = agent.run("Charge $500")
-    # response.is_suspended == True
-    # response.suspend_reason.type == "contract_violation"
-```
-
-### Human-in-the-Loop
+Mark any tool as requiring human approval before execution:
 
 ```python
 @tool("transfer_funds", description="Transfer money", requires_confirmation=True)
 def transfer_funds(from_acct: str, to_acct: str, amount: float) -> dict:
     return {"status": "transferred", "amount": amount}
 
-with Agent("./data") as agent:
-    agent.add_tool(transfer_funds)
-    agent.set_llm(OpenAI())
-    response = agent.run("Transfer $5000 from checking to savings")
+response = agent.run("Transfer $5000 from checking to savings")
+# response.is_suspended == True
+# response.suspend_reason.confirmation_id == "confirm_transfer_..."
 
-    if response.is_suspended:
-        # Agent paused before executing the transfer
-        agent.approve(response.execution_id, response.suspend_reason.confirmation_id)
-        response = agent.resume(response.execution_id)
-        # Now the transfer executes
+# The tool has NOT executed. Human reviews and approves:
+agent.approve(response.execution_id, response.suspend_reason.confirmation_id)
+response = agent.resume(response.execution_id)
+# Now the transfer executes
 ```
 
-### Crash Recovery
+## Contracts (code-level guardrails)
+
+Contracts are checks that run before a tool executes. They are code, not prompt engineering — the LLM cannot circumvent them.
 
 ```python
-# First run — charges payment, crashes before sending email
-response = agent.run("Process order #123")
-# Process dies here
+@agent.contract("max-charge")
+def check_charge(step_name, args):
+    if "charge" in step_name and args.get("amount", 0) > 1000:
+        raise ValueError("Charges over $1000 need VP approval")
 
-# Second run — payment step returns cached result (no double charge)
-response = agent.resume(execution_id)
-# Email sends, order completes
+response = agent.run("Charge $5000")
+# response.is_suspended == True
+# response.suspend_reason.type == "contract_violation"
+# The tool never executed
 ```
 
-### Multi-Agent Runtime
+## Budget Limits
+
+```python
+from durable import Budget
+
+agent.budget = Budget(max_dollars=2.00, max_llm_calls=10)
+response = agent.run("Research this topic thoroughly")
+
+if response.is_suspended:
+    print(f"Budget exhausted: {response.suspend_reason}")
+    # All completed work is preserved. Increase budget and resume.
+```
+
+## Multi-Agent Runtime
+
+One runtime, N agents, running as durable threads inside your process:
 
 ```python
 from durable import Runtime, Agent
 
 rt = Runtime("./data")
-agent_a = Agent("./data", runtime=rt, agent_id="research-bot", ...)
-agent_b = Agent("./data", runtime=rt, agent_id="writer-bot", ...)
+researcher = Agent("./data", runtime=rt, agent_id="researcher", ...)
+writer = Agent("./data", runtime=rt, agent_id="writer", ...)
 
-# Non-blocking spawn — agents run as durable threads
-exec_a = rt.go(agent_a, "Research the topic")
-exec_b = rt.go(agent_b, "Write the report")
+# Non-blocking spawn (like goroutines)
+rt.go(researcher, "Research the topic")
+rt.go(writer, "Write the report")
 
 # Lifecycle callbacks
 @rt.on_complete
 def done(agent_id, exec_id, response):
-    print(f"{agent_id} finished: {response[:50]}")
+    print(f"{agent_id} finished")
+
+@rt.on_suspend
+def paused(agent_id, exec_id, reason):
+    send_slack_notification(f"Approval needed: {reason}")
+
+# Signals trigger auto-resume (no explicit resume() call)
+rt.signal(exec_id, confirmation_id, True)
+
+# Health check
+rt.ping()  # {"engine_version": "0.1.0", "agents_active": 2}
 ```
 
-### Streaming
+## Idempotency Keys
+
+Every tool callback includes a unique idempotency key. Forward it to payment providers to prevent double-charges:
+
+```python
+from durable.agent import current_idempotency_key
+
+@tool("charge", description="Charge payment")
+def charge(customer_id: str, amount: float) -> dict:
+    stripe.PaymentIntent.create(
+        amount=int(amount * 100),
+        customer=customer_id,
+        idempotency_key=current_idempotency_key(),
+    )
+    return {"status": "charged"}
+```
+
+## LLM Providers
+
+| Provider | Python | Env Variable |
+|----------|--------|-------------|
+| OpenAI | `from durable.providers import OpenAI` | `OPENAI_API_KEY` |
+| Anthropic | `from durable.providers import Anthropic` | `ANTHROPIC_API_KEY` |
+| Custom | Any callable `(messages, tools, model) -> dict` | — |
+
+```python
+# Anthropic
+agent.set_llm(Anthropic())
+agent.set_llm(Anthropic(model="claude-opus-4-20250514"))
+
+# Custom provider
+def my_llm(messages, tools=None, model=None):
+    return {"content": "response text"}
+    # or: return {"tool_calls": [{"id": "1", "name": "tool", "arguments": {}}]}
+
+agent.set_llm(my_llm)
+```
+
+## Streaming
 
 ```python
 for chunk in agent.stream("Tell me a story"):
     print(chunk, end="", flush=True)
 ```
 
-### Testing
+## Testing
 
 ```python
 from durable.testing import MockAgent
@@ -154,213 +229,78 @@ def test_my_agent():
     assert agent.last_prompt == "What is the answer?"
 ```
 
-## LLM Providers
+## CLI
 
-| Provider | Import | Env Variable |
-|----------|--------|-------------|
-| OpenAI | `from durable.providers import OpenAI` | `OPENAI_API_KEY` |
-| Anthropic | `from durable.providers import Anthropic` | `ANTHROPIC_API_KEY` |
-| Custom | Any callable `(messages, tools, model) -> dict` | — |
+Inspect any execution after it runs:
 
-### Custom Provider
+```bash
+durable status --data-dir ./data                    # list all executions
+durable inspect <execution-id> --data-dir ./data    # detailed view
+durable steps <execution-id> --data-dir ./data      # step timeline
+durable cost <execution-id> --data-dir ./data       # token/cost breakdown
+durable replay <execution-id> --data-dir ./data     # animated replay
+durable export <execution-id> --data-dir ./data     # JSON export
+```
+
+## Structured Logging
 
 ```python
-def my_llm(messages, tools=None, model=None):
-    # Call any API
-    return {"content": "response text"}
-    # Or for tool calls:
-    return {"tool_calls": [{"id": "1", "name": "tool", "arguments": {}}]}
-
-agent.set_llm(my_llm)
+@rt.on_log
+def handle_log(entry):
+    # entry: {"ts": "...", "level": "INFO", "msg": "step completed",
+    #         "execution_id": "...", "step": "tool_search", "duration_ms": "45"}
+    logger.info(entry["msg"], extra=entry)
 ```
 
 ## Framework Integrations (experimental)
 
-Basic checkpoint persistence for existing frameworks. These use a
-Python file backend — not the Rust engine. They provide task-level
-crash recovery (resume from last completed task) but NOT the step-level
-exactly-once guarantees of native Durable agents.
-
-For full durable execution guarantees (exactly-once tool calls, WAL
-integrity, replay determinism), use the native `Agent` + `Runtime` API.
-
-### LangChain / LangGraph
+Basic checkpoint persistence for LangGraph, CrewAI, and Google ADK. These use a Python file backend — not the Rust engine — and provide task-level recovery, not step-level exactly-once. For full guarantees, use the native `Agent` + `Runtime` API.
 
 ```python
-from langgraph.graph import StateGraph
+# LangGraph
 from durable.integrations.langchain import DurableCheckpointer
-
 compiled = graph.compile(checkpointer=DurableCheckpointer("./data"))
 
-# Same thread_id resumes from last checkpoint
-result = compiled.invoke(
-    {"messages": [HumanMessage(content="Process order #123")]},
-    config={"configurable": {"thread_id": "order-123"}}
-)
-```
-
-### CrewAI
-
-```python
-from crewai import Agent, Task
+# CrewAI
 from durable.integrations.crewai import DurableCrew
-
-crew = DurableCrew(
-    agents=[researcher, writer],
-    tasks=[research_task, write_task],
-    data_dir="./data",
-)
-
-result = crew.kickoff(inputs={"topic": "AI safety"})
-# Crash mid-task → next kickoff() resumes from last completed task
+crew = DurableCrew(agents=[...], tasks=[...], data_dir="./data")
 ```
-
-### Google ADK
-
-```python
-from google.adk.agents import LlmAgent
-from durable.integrations.adk import durable_agent
-
-agent = durable_agent(
-    LlmAgent(name="OrderAgent", tools=[...], model=...),
-    data_dir="./data",
-)
-# Durability is automatic — session state persists across crashes
-```
-
-Install with: `pip install durable-runtime[langchain]`, `durable-runtime[crewai]`, or `durable-runtime[adk]`.
-
-## Architecture
-
-```
-┌─────────────────────────────────┐
-│  Python SDK (your code)         │  pip install durable-runtime
-├─────────────────────────────────┤
-│  Protocol Client                │  Invisible — managed subprocess
-├─────────────────────────────────┤
-│  Rust Engine (durable-runtime)  │  Event log, replay, crash recovery
-├─────────────────────────────────┤
-│  File Storage                   │  ./my-agent/events/*.ndjson
-└─────────────────────────────────┘
-```
-
-The Rust engine is a single binary managed as an invisible subprocess. The Python SDK communicates via NDJSON protocol over stdio. All durable state (event log, step memoization, crash recovery) lives in the Rust engine. Tools execute in your Python process.
-
-## Production Hardening
-
-### Authentication
-
-The runtime binary supports token-based authentication via CLI flag:
-
-```bash
-durable-runtime --sdk-mode --auth-token my-secret
-```
-
-> **Note:** The Python SDK does not yet pass auth tokens automatically.
-> This is planned for a future release.
-
-### Event Log Compaction
-
-Long-running agents accumulate events. The Rust engine takes periodic
-snapshots for fast resume — on resume, it loads the latest snapshot and
-replays only subsequent events instead of replaying the full history.
-
-Default interval: every 50 steps. Most agents complete in under 50 steps
-and never snapshot. Long-running agents (100+ steps) get snapshots that
-keep resume latency under 5ms regardless of history length. Configurable
-via `AgentConfig.snapshot_interval` (set to 0 to disable).
-
-```python
-# Compaction happens automatically via snapshot_interval (default: every 50 steps)
-# Manual compaction is also available via the event store
-```
-
-### Safety Limits
-
-The JSON parser enforces hard limits to prevent DoS:
-
-| Limit | Default | Protects Against |
-|-------|---------|-----------------|
-| Max nesting depth | 128 | Stack overflow from `[[[[...]]]]` |
-| Max string length | 10 MB | OOM from giant string values |
-| Max elements | 100,000 | OOM from massive arrays/objects |
-
-### Concurrency Protection
-
-- File storage uses PID-unique temp files to prevent write races between processes
-- Lease-based fencing ensures one worker per execution (TTL with automatic expiry)
-- Multi-threaded SDK mode: concurrent agent executions don't block each other
-
-### Structured Errors
-
-Errors include execution context for production debugging:
-
-```
-step 'tool_charge' (#3) in exec abc-123 failed: connection timeout
-```
-
-## Engine Invariants
-
-The runtime enforces seven invariants from the [durable execution specification](engine.md):
-
-| Invariant | What It Guarantees |
-|-----------|-------------------|
-| Replay Determinism | Same inputs + same history = same execution |
-| History Sufficiency | Any state can be reconstructed from the event log |
-| Dependency Completeness | Steps run in correct order, independent steps parallelize |
-| Suspension Transparency | Suspend/resume is invisible to workflow logic |
-| Mutual Exclusion | One worker per execution at a time (lease-based fencing) |
-| Error Classification | Every error classified as retry/fail/escalate |
-| Configuration Completeness | Unconfigured runtime cannot be constructed |
 
 ## How Durable Compares
 
 ### vs LangGraph
 
-LangGraph has checkpointing — you can save and restore graph state via
-a checkpointer backend (memory, SQLite, Postgres). This gives you:
-- Resume a conversation from where it left off
-- Branch and replay from any checkpoint
-- Human-in-the-loop interrupts via `interrupt_before`/`interrupt_after`
+LangGraph has checkpointing (save/restore graph state via SQLite, Postgres, etc). This gives you conversation resume and human-in-the-loop interrupts.
 
-What LangGraph checkpointing does NOT give you:
-- **Exactly-once tool execution.** LangGraph's standard `StateGraph`
-  checkpoints at node boundaries, not within nodes. If a node calls a
-  tool and the process crashes after the tool executes but before the
-  next checkpoint is saved, the tool re-executes on resume. LangGraph's
-  Functional API offers a `@task` decorator designed to cache sub-node
-  results, but it only works in the Functional API (not `StateGraph` or
-  `create_react_agent`), has known deployment issues on the LangGraph
-  API server, and LangGraph's own docs recommend designing all side
-  effects to be idempotent "in case of re-execution."
-- **Replay determinism enforcement.** LangGraph doesn't detect if your
-  tools or prompts changed between checkpoint and resume.
+What it does NOT give you: **exactly-once tool execution.** LangGraph's `StateGraph` checkpoints at node boundaries, not within nodes. If a tool executes and the process crashes before the next checkpoint, the tool re-executes on resume. LangGraph's `@task` decorator (Functional API only) is designed to address this but has known deployment issues, and their docs still recommend making all side effects idempotent "in case of re-execution."
 
-Durable provides step-level memoization: every step (LLM call and tool
-call) is individually persisted to an append-only event log BEFORE the
-next step begins. The event log is the source of truth, not in-memory
-state. Prompt drift and tool drift are detected and rejected on resume.
+Durable persists every step individually before the next begins. Prompt and tool drift are detected on resume.
 
 ### vs Temporal
 
-Temporal is the gold standard for durable execution. It provides
-everything Durable does and more: multi-machine clusters, workflow
-versioning, schedules, visibility UI, and battle-tested production
-hardening.
+Temporal is the gold standard: multi-machine clusters, workflow versioning, visibility UI, battle-tested in production. It requires a Temporal Server cluster, separate worker processes, and an infrastructure team.
 
-What Temporal requires that Durable doesn't:
-- A Temporal Server cluster (3+ nodes for production)
-- Worker processes separate from your application
-- Workflow code written in Temporal's SDK patterns
-- Infrastructure team to manage the cluster
+Durable is for teams that want those guarantees without operating distributed infrastructure. One process, one binary, files on disk. If you outgrow single-machine, Temporal is the right next step.
 
-Durable is for teams that want durable execution guarantees without
-operating distributed infrastructure. One process, one binary, files
-on disk. If you outgrow single-machine, Temporal is the right next step.
+## Architecture
+
+```
+┌─────────────────────────────────────┐
+│  Your code (Python, TypeScript)     │
+├─────────────────────────────────────┤
+│  SDK (zero dependencies)            │
+├─────────────────────────────────────┤
+│  Rust Engine (invisible subprocess) │
+├─────────────────────────────────────┤
+│  Event Log (append-only files)      │
+└─────────────────────────────────────┘
+```
+
+Single-process. The Rust engine is managed as an invisible subprocess. The LLM API is the bottleneck, not the runtime — a single machine handles more concurrent agents than most teams can afford in API costs.
 
 ## Zero Dependencies
 
-The Rust engine uses only the standard library. The Python SDK uses only stdlib (`json`, `subprocess`, `urllib`, `threading`, `dataclasses`). No transitive dependency hell.
+The Rust engine uses only the standard library. The Python SDK uses only stdlib (`json`, `subprocess`, `urllib`, `threading`). No transitive dependency hell.
 
 ## License
 
