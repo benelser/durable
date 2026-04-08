@@ -48,3 +48,7 @@ sdks/python/durable/_bin/
 .pytest_cache/
 htmlcov/
 .coverage
+
+
+# APM dependencies
+apm_modules/

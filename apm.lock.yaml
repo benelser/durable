@@ -1,0 +1,27 @@
+lockfile_version: '1'
+generated_at: '2026-04-08T01:15:18.750954+00:00'
+apm_version: 0.8.11
+dependencies:
+- repo_url: benelser/bincast
+  host: github.com
+  resolved_commit: 928032833a26a7a9a41ee62a9b491438fc391bfe
+  package_type: apm_package
+  deployed_files:
+  - .claude/skills/bincast-add-channel
+  - .claude/skills/bincast-init
+  - .claude/skills/bincast-release
+  - .claude/skills/bincast-setup-secrets
+  - .claude/skills/bincast-shared
+  - .claude/skills/bincast-troubleshoot
+  - .github/skills/bincast-add-channel
+  - .github/skills/bincast-init
+  - .github/skills/bincast-release
+  - .github/skills/bincast-setup-secrets
+  - .github/skills/bincast-shared
+  - .github/skills/bincast-troubleshoot
+  content_hash: sha256:6a56773687e68582430fdf4f71c0dbbdfcc06487fe8d535a869dae8f8954e9d8
+mcp_servers:
+- microsoft/playwright-mcp
+mcp_configs:
+  microsoft/playwright-mcp:
+    name: microsoft/playwright-mcp

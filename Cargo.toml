@@ -1,5 +1,5 @@
 [package]
-name = "durable-runtime"
+name = "delite-core"
 version = "0.1.0"
 edition = "2021"
 description = "The SQLite of durable agent execution — crash-recoverable AI agents with exactly-once semantics. Zero dependencies."
@@ -9,8 +9,8 @@ keywords = ["agent", "durable", "llm", "execution", "replay"]
 categories = ["development-tools", "asynchronous"]
 
 [[bin]]
-name = "durable"
-path = "src/bin/durable.rs"
+name = "delite"
+path = "src/bin/delite.rs"
 
 [dependencies]
 

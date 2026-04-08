@@ -1,0 +1,9 @@
+name: durable
+version: 1.0.0
+description: APM project for durable
+author: benelser
+dependencies:
+  apm:
+  - benelser/bincast
+  mcp: []
+scripts: {}
