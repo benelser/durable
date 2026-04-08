@@ -27,9 +27,6 @@ scope = "@benelser"
 [distribute.homebrew]
 tap = "benelser/homebrew-durable"
 
-[distribute.scoop]
-bucket = "benelser/scoop-durable"
-
 [distribute.cargo]
 crate_name = "durable-runtime"
 

@@ -45,7 +45,7 @@ Only set up missing secrets.
 
 ## Flow: Browser-assisted (with Playwright MCP)
 
-> **IMPORTANT:** Use the `@playwright/mcp` server tools (prefixed with `browser_`), NOT chrome-devtools or other browser MCP tools. Playwright MCP is declared as a dependency in this package's `apm.yml`.
+> **IMPORTANT:** Use `@playwright/mcp` tools (prefixed with `browser_`), NOT chrome-devtools MCP. Check if Playwright MCP is available by looking for `browser_navigate` in your available tools. If only chrome-devtools tools are available (like `navigate_page`), fall back to the manual flow below.
 
 The agent navigates the user to the correct page and provides exact instructions. The agent DOES NOT read token values from the page.
 

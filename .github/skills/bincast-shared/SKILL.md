@@ -96,3 +96,18 @@ GitHub Releases, PyPI, npm, Homebrew, Scoop, crates.io, cargo-binstall, install 
 - Tag format: `v{version}` (e.g., `v0.2.0`)
 - CI triggers on tag push (`v*`)
 - `bincast version` bumps and commits. `bincast release` tags and pushes. They compose.
+
+## Secrets Reference
+
+When explaining secrets to users, use plain language:
+
+| Secret | Plain English | When needed |
+|---|---|---|
+| `GITHUB_TOKEN` | Automatic — GitHub provides this in CI | Always (no setup needed) |
+| `CARGO_REGISTRY_TOKEN` | API token for publishing to crates.io | When `[distribute.cargo]` is enabled |
+| `PYPI_TOKEN` | API token for publishing to PyPI | When `[distribute.pypi]` is enabled |
+| `NPM_TOKEN` | Automation token for publishing to npm | When `[distribute.npm]` is enabled |
+| `TAP_GITHUB_TOKEN` | GitHub PAT that lets CI push formula updates to your Homebrew tap repo | When `[distribute.homebrew]` is enabled |
+| `BUCKET_GITHUB_TOKEN` | GitHub PAT that lets CI push manifest updates to your Scoop bucket repo (Windows) | When `[distribute.scoop]` is enabled |
+
+TAP and BUCKET tokens need fine-grained PATs with `Contents: Read and write` permission on the specific tap/bucket repository only.

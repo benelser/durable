@@ -278,16 +278,3 @@ jobs:
           repository: benelser/homebrew-durable
           event-type: update-formula
           client-payload: '{"version": "${{ github.ref_name }}"}'
-
-  dispatch-scoop:
-    name: Update Scoop bucket
-    needs: [release]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Dispatch to bucket repo
-        uses: peter-evans/repository-dispatch@v3
-        with:
-          token: ${{ secrets.BUCKET_GITHUB_TOKEN }}
-          repository: benelser/scoop-durable
-          event-type: update-manifest
-          client-payload: '{"version": "${{ github.ref_name }}"}'
