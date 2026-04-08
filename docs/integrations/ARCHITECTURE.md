@@ -1,6 +1,6 @@
 # Integration Architecture Guide
 
-How to build and maintain durable integrations for agent frameworks.
+How to build and maintain delite integrations for agent frameworks.
 
 ## Core Principle
 
@@ -12,17 +12,17 @@ dies mid-execution, work is lost. They all solve it differently:
 | LangGraph | Checkpointers (pluggable) | Replay from checkpoint |
 | CrewAI | Memory system (Chroma + SQLite) | None — restart from scratch |
 | Google ADK | Session state (managed) | Partial — session survives, steps don't |
-| **Durable** | Event-sourced log | Full — replay any execution, exactly-once |
+| **delite** | Event-sourced log | Full — replay any execution, exactly-once |
 
 Our integration strategy: **plug into each framework's existing persistence
 point and add durability guarantees they don't have natively.**
 
-## The DurableBackend Abstraction
+## The deliteBackend Abstraction
 
-All integrations share `DurableBackend` — a file-based persistence layer:
+All integrations share `deliteBackend` — a file-based persistence layer:
 
 ```
-DurableBackend
+deliteBackend
 ├── save_checkpoint(thread_id, state) → checkpoint_id
 ├── load_checkpoint(thread_id) → state
 ├── record_step(thread_id, name, index, result)
@@ -79,7 +79,7 @@ CrewAI doesn't have a checkpointer interface. We wrap `Crew` and
 inject callbacks to track task completion.
 
 ```
-DurableCrew.kickoff()
+deliteCrew.kickoff()
   → check for existing checkpoint
   → if checkpoint: skip completed tasks
   → Crew.kickoff(remaining_tasks, task_callback=our_callback)
@@ -118,13 +118,13 @@ the framework knowing.
    - Does it have callbacks? → Pattern 2 or 3
    - Neither? → Wrap the main execution method
 
-2. **Implement using DurableBackend:**
+2. **Implement using deliteBackend:**
    ```python
-   from durable.integrations._base import DurableBackend
+   from delite.integrations._base import deliteBackend
 
-   class DurableMyFramework:
+   class deliteMyFramework:
        def __init__(self, data_dir="./data"):
-           self._backend = DurableBackend(data_dir)
+           self._backend = deliteBackend(data_dir)
 
        def run(self, ...):
            # Check for checkpoint
@@ -158,8 +158,8 @@ the framework knowing.
    - Source links for tracking
 
 5. **Write an example** that demonstrates the "wow factor":
-   - Show the framework without durable (works, but fragile)
-   - Show the same workflow with durable (crash-proof)
+   - Show the framework without delite (works, but fragile)
+   - Show the same workflow with delite (crash-proof)
    - Include side-effect counting to prove exactly-once
 
 ## Version Compatibility Strategy
@@ -183,7 +183,7 @@ When upstream releases a new version:
 
 Integration tests should work in two modes:
 
-1. **Unit mode** (no framework installed): Test `DurableBackend` directly
+1. **Unit mode** (no framework installed): Test `deliteBackend` directly
 2. **Integration mode** (framework installed): Test the full wrapper
 
 ```python

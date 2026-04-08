@@ -52,3 +52,6 @@ htmlcov/
 
 # APM dependencies
 apm_modules/
+
+# Local specs and research (not published)
+/local/

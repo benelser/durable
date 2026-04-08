@@ -1,8 +1,8 @@
-# Durable Agent Runtime — Wire Protocol Specification v1.0
+# delite — Wire Protocol Specification v1.0
 
 ## Overview
 
-The durable runtime communicates with external tools and LLM adapters via **newline-delimited JSON (NDJSON)** over **stdin/stdout**. Each message is a single JSON object followed by a newline character (`\n`).
+The delite runtime communicates with external tools and LLM adapters via **newline-delimited JSON (NDJSON)** over **stdin/stdout**. Each message is a single JSON object followed by a newline character (`\n`).
 
 ## Envelope
 
