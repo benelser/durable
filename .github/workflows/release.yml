@@ -21,16 +21,22 @@ jobs:
         include:
           - target: aarch64-apple-darwin
             runner: macos-latest
+            manylinux: auto
           - target: x86_64-apple-darwin
             runner: macos-latest
+            manylinux: auto
           - target: aarch64-unknown-linux-gnu
             runner: ubuntu-latest
+            manylinux: 2_28
           - target: x86_64-unknown-linux-gnu
             runner: ubuntu-latest
+            manylinux: auto
           - target: x86_64-unknown-linux-musl
             runner: ubuntu-latest
+            manylinux: musllinux_1_2
           - target: x86_64-pc-windows-msvc
             runner: windows-latest
+            manylinux: auto
 
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
@@ -89,7 +95,7 @@ jobs:
         with:
           target: ${{ matrix.target }}
           args: --release --bindings bin --strip
-          manylinux: auto
+          manylinux: ${{ matrix.manylinux }}
 
       - name: Compute SHA-256
         shell: bash
