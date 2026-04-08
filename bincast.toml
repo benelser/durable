@@ -1,6 +1,6 @@
 [package]
-name = "durable-runtime"
-binary = "durable"
+name = "delite-core"
+binary = "delite"
 description = "The SQLite of durable agent execution â crash-recoverable AI agents with exactly-once semantics. Zero dependencies."
 repository = "https://github.com/benelser/durable"
 license = "MIT"
@@ -19,16 +19,16 @@ platforms = [
 release = true
 
 [distribute.pypi]
-package_name = "durable-runtime"
+package_name = "delite-core"
 
 [distribute.npm]
-scope = "@benelser"
+scope = "@bjelser"
 
 [distribute.homebrew]
-tap = "benelser/homebrew-durable"
+tap = "benelser/homebrew-tap"
 
 [distribute.cargo]
-crate_name = "durable-runtime"
+crate_name = "delite-core"
 
 [distribute.install_script]
 enabled = true

@@ -41,10 +41,8 @@ Ask the user how they want people to install their tool. Map their answer to cha
 | "pip install" | `pypi` |
 | "npm install" | `npm` (also need `--npm-scope`) |
 | "brew install" | `homebrew` |
-| "scoop install" | `scoop` |
 | "cargo install" | `cargo` |
 | "curl script" | `install-scripts` |
-| "everything" / "all" | `github,pypi,npm,homebrew,scoop,cargo,install-scripts` |
 | "just GitHub" | `github,install-scripts` |
 | "rust developers" | `github,cargo,install-scripts` |
 
@@ -55,7 +53,6 @@ Then run:
 bincast init --channels github,pypi,homebrew,cargo,install-scripts --yes
 
 # Example: user wants everything including npm
-bincast init --channels github,pypi,npm,homebrew,scoop,cargo,install-scripts --npm-scope @their-org --yes
 
 # Example: minimal — just GitHub Releases
 bincast init --channels github,install-scripts --yes
@@ -65,7 +62,6 @@ bincast init --channels github,install-scripts --yes
 
 - `--npm-scope @org` — required when npm channel is enabled
 - `--tap owner/homebrew-name` — optional, defaults to `owner/homebrew-{project}`
-- `--bucket owner/scoop-name` — optional, defaults to `owner/scoop-{project}`
 
 ### Confirmation
 
@@ -107,4 +103,3 @@ The `!` prefix runs it in the current session. The wizard will ask for profile a
 - `../bincast-release/SKILL.md` — releasing after setup
 
 > [!CAUTION]
-> `bincast init` creates files and may create GitHub repositories (Homebrew tap, Scoop bucket) if `gh` CLI is available. Always confirm with the user before running.

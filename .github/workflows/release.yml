@@ -67,9 +67,9 @@ jobs:
         run: |
           cd target/${{ matrix.target }}/release
           if [[ "${{ matrix.target }}" == *"windows"* ]]; then
-            7z a ../../../durable-runtime-${{ matrix.target }}.zip durable.exe
+            7z a ../../../delite-core-${{ matrix.target }}.zip delite.exe
           else
-            tar czf ../../../durable-runtime-${{ matrix.target }}.tar.gz durable
+            tar czf ../../../delite-core-${{ matrix.target }}.tar.gz delite
           fi
 
       - name: Transform README for PyPI
@@ -95,7 +95,7 @@ jobs:
         shell: bash
         run: |
           shopt -s nullglob
-          for f in durable-runtime-${{ matrix.target }}.* target/wheels/*.whl; do
+          for f in delite-core-${{ matrix.target }}.* target/wheels/*.whl; do
             if [ -f "$f" ]; then
               sha256sum "$f" > "$f.sha256" 2>/dev/null || shasum -a 256 "$f" > "$f.sha256"
             fi
@@ -106,13 +106,13 @@ jobs:
           runner.os != 'Windows' &&
           !(runner.arch == 'X64' && contains(matrix.target, 'aarch64'))
         run: |
-          target/${{ matrix.target }}/release/durable --help
+          target/${{ matrix.target }}/release/delite --help
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: archive-${{ matrix.target }}
           path: |
-            durable-runtime-${{ matrix.target }}.*
+            delite-core-${{ matrix.target }}.*
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
@@ -144,7 +144,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/project/durable-runtime
+      url: https://pypi.org/project/delite-core
     permissions:
       id-token: write
     steps:
@@ -187,63 +187,63 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           mkdir -p npm-darwin-arm64/bin
-          if [[ -f "artifacts/durable-runtime-aarch64-apple-darwin.tar.gz" ]]; then
-            tar xzf "artifacts/durable-runtime-aarch64-apple-darwin.tar.gz" -C "npm-darwin-arm64/bin/"
-          elif [[ -f "artifacts/durable-runtime-aarch64-apple-darwin.zip" ]]; then
-            unzip -o "artifacts/durable-runtime-aarch64-apple-darwin.zip" -d "npm-darwin-arm64/bin/"
+          if [[ -f "artifacts/delite-core-aarch64-apple-darwin.tar.gz" ]]; then
+            tar xzf "artifacts/delite-core-aarch64-apple-darwin.tar.gz" -C "npm-darwin-arm64/bin/"
+          elif [[ -f "artifacts/delite-core-aarch64-apple-darwin.zip" ]]; then
+            unzip -o "artifacts/delite-core-aarch64-apple-darwin.zip" -d "npm-darwin-arm64/bin/"
           fi
           cat > "npm-darwin-arm64/package.json" << PKGJSON
-          {"name":"@benelser/durable-darwin-arm64","version":"${VERSION}","os":["darwin"],"cpu":["arm64"],"bin":{"durable":"bin/durable"},"preferUnplugged":true}
+          {"name":"@bjelser/delite-darwin-arm64","version":"${VERSION}","os":["darwin"],"cpu":["arm64"],"bin":{"delite":"bin/delite"},"preferUnplugged":true}
           PKGJSON
           cd "npm-darwin-arm64" && npm publish --provenance --access public && cd ..
           mkdir -p npm-darwin-x64/bin
-          if [[ -f "artifacts/durable-runtime-x86_64-apple-darwin.tar.gz" ]]; then
-            tar xzf "artifacts/durable-runtime-x86_64-apple-darwin.tar.gz" -C "npm-darwin-x64/bin/"
-          elif [[ -f "artifacts/durable-runtime-x86_64-apple-darwin.zip" ]]; then
-            unzip -o "artifacts/durable-runtime-x86_64-apple-darwin.zip" -d "npm-darwin-x64/bin/"
+          if [[ -f "artifacts/delite-core-x86_64-apple-darwin.tar.gz" ]]; then
+            tar xzf "artifacts/delite-core-x86_64-apple-darwin.tar.gz" -C "npm-darwin-x64/bin/"
+          elif [[ -f "artifacts/delite-core-x86_64-apple-darwin.zip" ]]; then
+            unzip -o "artifacts/delite-core-x86_64-apple-darwin.zip" -d "npm-darwin-x64/bin/"
           fi
           cat > "npm-darwin-x64/package.json" << PKGJSON
-          {"name":"@benelser/durable-darwin-x64","version":"${VERSION}","os":["darwin"],"cpu":["x64"],"bin":{"durable":"bin/durable"},"preferUnplugged":true}
+          {"name":"@bjelser/delite-darwin-x64","version":"${VERSION}","os":["darwin"],"cpu":["x64"],"bin":{"delite":"bin/delite"},"preferUnplugged":true}
           PKGJSON
           cd "npm-darwin-x64" && npm publish --provenance --access public && cd ..
           mkdir -p npm-linux-arm64/bin
-          if [[ -f "artifacts/durable-runtime-aarch64-unknown-linux-gnu.tar.gz" ]]; then
-            tar xzf "artifacts/durable-runtime-aarch64-unknown-linux-gnu.tar.gz" -C "npm-linux-arm64/bin/"
-          elif [[ -f "artifacts/durable-runtime-aarch64-unknown-linux-gnu.zip" ]]; then
-            unzip -o "artifacts/durable-runtime-aarch64-unknown-linux-gnu.zip" -d "npm-linux-arm64/bin/"
+          if [[ -f "artifacts/delite-core-aarch64-unknown-linux-gnu.tar.gz" ]]; then
+            tar xzf "artifacts/delite-core-aarch64-unknown-linux-gnu.tar.gz" -C "npm-linux-arm64/bin/"
+          elif [[ -f "artifacts/delite-core-aarch64-unknown-linux-gnu.zip" ]]; then
+            unzip -o "artifacts/delite-core-aarch64-unknown-linux-gnu.zip" -d "npm-linux-arm64/bin/"
           fi
           cat > "npm-linux-arm64/package.json" << PKGJSON
-          {"name":"@benelser/durable-linux-arm64","version":"${VERSION}","os":["linux"],"cpu":["arm64"],"bin":{"durable":"bin/durable"},"preferUnplugged":true}
+          {"name":"@bjelser/delite-linux-arm64","version":"${VERSION}","os":["linux"],"cpu":["arm64"],"bin":{"delite":"bin/delite"},"preferUnplugged":true}
           PKGJSON
           cd "npm-linux-arm64" && npm publish --provenance --access public && cd ..
           mkdir -p npm-linux-x64/bin
-          if [[ -f "artifacts/durable-runtime-x86_64-unknown-linux-gnu.tar.gz" ]]; then
-            tar xzf "artifacts/durable-runtime-x86_64-unknown-linux-gnu.tar.gz" -C "npm-linux-x64/bin/"
-          elif [[ -f "artifacts/durable-runtime-x86_64-unknown-linux-gnu.zip" ]]; then
-            unzip -o "artifacts/durable-runtime-x86_64-unknown-linux-gnu.zip" -d "npm-linux-x64/bin/"
+          if [[ -f "artifacts/delite-core-x86_64-unknown-linux-gnu.tar.gz" ]]; then
+            tar xzf "artifacts/delite-core-x86_64-unknown-linux-gnu.tar.gz" -C "npm-linux-x64/bin/"
+          elif [[ -f "artifacts/delite-core-x86_64-unknown-linux-gnu.zip" ]]; then
+            unzip -o "artifacts/delite-core-x86_64-unknown-linux-gnu.zip" -d "npm-linux-x64/bin/"
           fi
           cat > "npm-linux-x64/package.json" << PKGJSON
-          {"name":"@benelser/durable-linux-x64","version":"${VERSION}","os":["linux"],"cpu":["x64"],"bin":{"durable":"bin/durable"},"preferUnplugged":true}
+          {"name":"@bjelser/delite-linux-x64","version":"${VERSION}","os":["linux"],"cpu":["x64"],"bin":{"delite":"bin/delite"},"preferUnplugged":true}
           PKGJSON
           cd "npm-linux-x64" && npm publish --provenance --access public && cd ..
           mkdir -p npm-linux-x64/bin
-          if [[ -f "artifacts/durable-runtime-x86_64-unknown-linux-musl.tar.gz" ]]; then
-            tar xzf "artifacts/durable-runtime-x86_64-unknown-linux-musl.tar.gz" -C "npm-linux-x64/bin/"
-          elif [[ -f "artifacts/durable-runtime-x86_64-unknown-linux-musl.zip" ]]; then
-            unzip -o "artifacts/durable-runtime-x86_64-unknown-linux-musl.zip" -d "npm-linux-x64/bin/"
+          if [[ -f "artifacts/delite-core-x86_64-unknown-linux-musl.tar.gz" ]]; then
+            tar xzf "artifacts/delite-core-x86_64-unknown-linux-musl.tar.gz" -C "npm-linux-x64/bin/"
+          elif [[ -f "artifacts/delite-core-x86_64-unknown-linux-musl.zip" ]]; then
+            unzip -o "artifacts/delite-core-x86_64-unknown-linux-musl.zip" -d "npm-linux-x64/bin/"
           fi
           cat > "npm-linux-x64/package.json" << PKGJSON
-          {"name":"@benelser/durable-linux-x64","version":"${VERSION}","os":["linux"],"cpu":["x64"],"bin":{"durable":"bin/durable"},"preferUnplugged":true}
+          {"name":"@bjelser/delite-linux-x64","version":"${VERSION}","os":["linux"],"cpu":["x64"],"bin":{"delite":"bin/delite"},"preferUnplugged":true}
           PKGJSON
           cd "npm-linux-x64" && npm publish --provenance --access public && cd ..
           mkdir -p npm-win32-x64/bin
-          if [[ -f "artifacts/durable-runtime-x86_64-pc-windows-msvc.tar.gz" ]]; then
-            tar xzf "artifacts/durable-runtime-x86_64-pc-windows-msvc.tar.gz" -C "npm-win32-x64/bin/"
-          elif [[ -f "artifacts/durable-runtime-x86_64-pc-windows-msvc.zip" ]]; then
-            unzip -o "artifacts/durable-runtime-x86_64-pc-windows-msvc.zip" -d "npm-win32-x64/bin/"
+          if [[ -f "artifacts/delite-core-x86_64-pc-windows-msvc.tar.gz" ]]; then
+            tar xzf "artifacts/delite-core-x86_64-pc-windows-msvc.tar.gz" -C "npm-win32-x64/bin/"
+          elif [[ -f "artifacts/delite-core-x86_64-pc-windows-msvc.zip" ]]; then
+            unzip -o "artifacts/delite-core-x86_64-pc-windows-msvc.zip" -d "npm-win32-x64/bin/"
           fi
           cat > "npm-win32-x64/package.json" << PKGJSON
-          {"name":"@benelser/durable-win32-x64","version":"${VERSION}","os":["win32"],"cpu":["x64"],"bin":{"durable":"bin/durable.exe"},"preferUnplugged":true}
+          {"name":"@bjelser/delite-win32-x64","version":"${VERSION}","os":["win32"],"cpu":["x64"],"bin":{"delite":"bin/delite.exe"},"preferUnplugged":true}
           PKGJSON
           cd "npm-win32-x64" && npm publish --provenance --access public && cd ..
 
@@ -275,6 +275,6 @@ jobs:
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.TAP_GITHUB_TOKEN }}
-          repository: benelser/homebrew-durable
+          repository: benelser/homebrew-tap
           event-type: update-formula
           client-payload: '{"version": "${{ github.ref_name }}"}'

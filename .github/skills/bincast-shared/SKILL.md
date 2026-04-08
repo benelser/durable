@@ -88,7 +88,7 @@ enabled = true
 
 ## Distribution Channels
 
-GitHub Releases, PyPI, npm, Homebrew, Scoop, crates.io, cargo-binstall, install scripts (curl|sh + irm|iex).
+GitHub Releases, PyPI, npm, Homebrew, crates.io, cargo-binstall, install scripts (curl|sh + irm|iex).
 
 ## Key Conventions
 
@@ -108,6 +108,5 @@ When explaining secrets to users, use plain language:
 | `PYPI_TOKEN` | API token for publishing to PyPI | When `[distribute.pypi]` is enabled |
 | `NPM_TOKEN` | Automation token for publishing to npm | When `[distribute.npm]` is enabled |
 | `TAP_GITHUB_TOKEN` | GitHub PAT that lets CI push formula updates to your Homebrew tap repo | When `[distribute.homebrew]` is enabled |
-| `BUCKET_GITHUB_TOKEN` | GitHub PAT that lets CI push manifest updates to your Scoop bucket repo (Windows) | When `[distribute.scoop]` is enabled |
 
 TAP and BUCKET tokens need fine-grained PATs with `Contents: Read and write` permission on the specific tap/bucket repository only.

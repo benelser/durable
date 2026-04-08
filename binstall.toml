@@ -1,8 +1,8 @@
 # Add this to your Cargo.toml for cargo-binstall support:
 
 [package.metadata.binstall]
-pkg-url = "https://github.com/benelser/durable/releases/download/v{{ version }}/durable-{{ target }}{{ archive-suffix }}"
-bin-dir = "durable{{ binary-ext }}"
+pkg-url = "https://github.com/benelser/durable/releases/download/v{{ version }}/delite-{{ target }}{{ archive-suffix }}"
+bin-dir = "delite{{ binary-ext }}"
 pkg-fmt = "tgz"
 
 [package.metadata.binstall.overrides.x86_64-pc-windows-msvc]

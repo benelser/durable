@@ -24,7 +24,6 @@ metadata:
 | PyPI | `[distribute.pypi]` | `package_name`, `PYPI_TOKEN` secret |
 | npm | `[distribute.npm]` | `scope`, `NPM_TOKEN` secret |
 | Homebrew | `[distribute.homebrew]` | `tap` repo, `TAP_GITHUB_TOKEN` secret |
-| Scoop | `[distribute.scoop]` | `bucket` repo, `BUCKET_GITHUB_TOKEN` secret |
 | crates.io | `[distribute.cargo]` | `crate_name`, `CARGO_REGISTRY_TOKEN` secret |
 | Install scripts | `[distribute.install_script]` | Nothing extra |
 
@@ -45,7 +44,6 @@ package_name = "my-tool"
 bincast generate
 ```
 
-4. For Homebrew/Scoop: create the tap/bucket repo if needed:
 ```bash
 gh repo create owner/homebrew-my-tool --private
 ```
