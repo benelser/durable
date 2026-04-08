@@ -1,11 +1,11 @@
-//! durable — the SQLite of durable agent execution.
+//! delite — the SQLite of durable agent execution.
 //!
 //! One binary. Every feature. Every language.
 
-use durable_runtime::json::{self, ToJson};
-use durable_runtime::storage::event::{EventType, FileEventStore, EventStore};
-use durable_runtime::storage::{FileStorage, ExecutionLog};
-use durable_runtime::core::types::ExecutionStatus;
+use delite_core::json::{self, ToJson};
+use delite_core::storage::event::{EventType, FileEventStore, EventStore};
+use delite_core::storage::{FileStorage, ExecutionLog};
+use delite_core::core::types::ExecutionStatus;
 use std::path::Path;
 
 // ---------------------------------------------------------------------------
@@ -85,8 +85,8 @@ fn has_flag(args: &[String], flag: &str) -> bool {
 
 fn find_data_dir(args: &[String]) -> String {
     if let Some(d) = extract_flag(args, "--data-dir") { return d.to_string(); }
-    if let Ok(d) = std::env::var("DURABLE_DATA_DIR") { if !d.is_empty() { return d; } }
-    for c in &["./data", "./durable-data"] {
+    if let Ok(d) = std::env::var("DELITE_DATA_DIR") { if !d.is_empty() { return d; } }
+    for c in &["./data", "./delite-data"] {
         let p = Path::new(c);
         if p.join("events").exists() || p.join("executions").exists() { return c.to_string(); }
     }
@@ -105,9 +105,9 @@ fn positional_arg(args: &[String], index: usize) -> Option<&str> {
     positionals.get(index).copied()
 }
 
-fn parse_exec_id(s: &str) -> durable_runtime::core::types::ExecutionId {
-    match durable_runtime::core::uuid::Uuid::parse(s) {
-        Ok(uuid) => durable_runtime::core::types::ExecutionId::from_uuid(uuid),
+fn parse_exec_id(s: &str) -> delite_core::core::types::ExecutionId {
+    match delite_core::core::uuid::Uuid::parse(s) {
+        Ok(uuid) => delite_core::core::types::ExecutionId::from_uuid(uuid),
         Err(e) => { eprintln!("Invalid execution ID '{}': {}", s, e); std::process::exit(1); }
     }
 }
@@ -141,7 +141,7 @@ fn main() {
         "health" => cmd_health(&sub_args),
         "compact" => cmd_compact(&sub_args),
         other => {
-            eprintln!("Unknown command: {}\nRun `durable help` for usage.", other);
+            eprintln!("Unknown command: {}\nRun `delite help` for usage.", other);
             std::process::exit(2);
         }
     }
@@ -154,45 +154,45 @@ fn main() {
 fn cmd_help(args: &[String]) {
     if let Some(cmd) = args.first() {
         match cmd.as_str() {
-            "init" => println!("durable init <name> [--lang python|typescript]\n\n  Create a new agent project."),
-            "runtime" => println!("durable runtime [--auth-token <token>]\n\n  Start the execution runtime. SDKs connect via stdio."),
-            "status" => println!("durable status [--data-dir <path>] [--json]\n\n  List all executions."),
-            "inspect" => println!("durable inspect <id> [--data-dir <path>] [--json]\n\n  Detailed view of an execution."),
-            "steps" => println!("durable steps <id> [--data-dir <path>]\n\n  Step-by-step timeline with timing."),
-            "events" => println!("durable events <id> [--data-dir <path>] [--json]\n\n  Raw event log."),
-            "export" => println!("durable export <id> [--data-dir <path>] [-o <file>]\n\n  Export execution as JSON."),
-            "health" => println!("durable health [--data-dir <path>]\n\n  Storage health check."),
-            "compact" => println!("durable compact [--data-dir <path>]\n\n  Compact old event logs."),
+            "init" => println!("delite init <name> [--lang python|typescript]\n\n  Create a new agent project."),
+            "runtime" => println!("delite runtime [--auth-token <token>]\n\n  Start the execution runtime. SDKs connect via stdio."),
+            "status" => println!("delite status [--data-dir <path>] [--json]\n\n  List all executions."),
+            "inspect" => println!("delite inspect <id> [--data-dir <path>] [--json]\n\n  Detailed view of an execution."),
+            "steps" => println!("delite steps <id> [--data-dir <path>]\n\n  Step-by-step timeline with timing."),
+            "events" => println!("delite events <id> [--data-dir <path>] [--json]\n\n  Raw event log."),
+            "export" => println!("delite export <id> [--data-dir <path>] [-o <file>]\n\n  Export execution as JSON."),
+            "health" => println!("delite health [--data-dir <path>]\n\n  Storage health check."),
+            "compact" => println!("delite compact [--data-dir <path>]\n\n  Compact old event logs."),
             _ => eprintln!("Unknown command: {}", cmd),
         }
         return;
     }
 
-    println!("\n{}durable{} — the SQLite of durable agent execution\n", C::bold(), C::reset());
+    println!("\n{}delite{} — the SQLite of durable agent execution\n", C::bold(), C::reset());
     println!("{}Getting started:{}",       C::bold(), C::reset());
-    println!("  durable init <name> [--lang python|typescript]\n");
+    println!("  delite init <name> [--lang python|typescript]\n");
     println!("{}Runtime:{}",               C::bold(), C::reset());
-    println!("  durable runtime [--auth-token <token>]\n");
+    println!("  delite runtime [--auth-token <token>]\n");
     println!("{}Inspection:{}",            C::bold(), C::reset());
-    println!("  durable status     [--data-dir <path>]   List all executions");
-    println!("  durable inspect <id>                     Detailed view");
-    println!("  durable steps <id>                       Step timeline");
-    println!("  durable events <id>                      Raw event log");
-    println!("  durable export <id> [-o file]            Export as JSON\n");
+    println!("  delite status     [--data-dir <path>]   List all executions");
+    println!("  delite inspect <id>                     Detailed view");
+    println!("  delite steps <id>                       Step timeline");
+    println!("  delite events <id>                      Raw event log");
+    println!("  delite export <id> [-o file]            Export as JSON\n");
     println!("{}Operations:{}",            C::bold(), C::reset());
-    println!("  durable health                           Storage health");
-    println!("  durable compact                          Compact event logs\n");
+    println!("  delite health                           Storage health");
+    println!("  delite compact                          Compact event logs\n");
     println!("{}Info:{}",                  C::bold(), C::reset());
-    println!("  durable version                          Show version");
-    println!("  durable help <command>                   Command help\n");
+    println!("  delite version                          Show version");
+    println!("  delite help <command>                   Command help\n");
     println!("{}Environment:{}",           C::bold(), C::reset());
-    println!("  DURABLE_DATA_DIR     Data directory (default: ./data)");
+    println!("  DELITE_DATA_DIR      Data directory (default: ./data)");
     println!("  OPENAI_API_KEY       OpenAI provider");
     println!("  ANTHROPIC_API_KEY    Anthropic provider\n");
 }
 
 fn cmd_version() {
-    println!("durable {} (protocol v{})", env!("CARGO_PKG_VERSION"), durable_runtime::protocol::PROTOCOL_VERSION);
+    println!("delite {} (protocol v{})", env!("CARGO_PKG_VERSION"), delite_core::protocol::PROTOCOL_VERSION);
 }
 
 // ---------------------------------------------------------------------------
@@ -202,8 +202,8 @@ fn cmd_version() {
 fn cmd_runtime(args: &[String]) {
     let auth = extract_flag(args, "--auth-token")
         .map(String::from)
-        .or_else(|| std::env::var("DURABLE_AUTH_TOKEN").ok());
-    durable_runtime::protocol::sdk_mode::run_sdk_mode_with_auth(auth.as_deref());
+        .or_else(|| std::env::var("DELITE_AUTH_TOKEN").ok());
+    delite_core::protocol::sdk_mode::run_sdk_mode_with_auth(auth.as_deref());
 }
 
 // ---------------------------------------------------------------------------
@@ -240,7 +240,7 @@ fn cmd_init(args: &[String]) {
             wf(dir, ".gitignore", "/data/\n.env\nnode_modules/\n");
             println!("\n  {}{}Created {}/{} (TypeScript)\n", C::green(), C::bold(), name, C::reset());
             println!("  {}TypeScript SDK coming soon.{}", C::yellow(), C::reset());
-            println!("  Use Python today: durable init {} --lang python\n", name);
+            println!("  Use Python today: delite init {} --lang python\n", name);
         }
         other => { eprintln!("Unknown language: {}. Supported: python, typescript", other); std::process::exit(1); }
     }
@@ -255,7 +255,7 @@ const PYTHON_AGENT_TEMPLATE: &str = r#"#!/usr/bin/env python3
 
 Run:     python agent.py
 Resume:  python agent.py --resume <execution-id>
-Inspect: durable status --data-dir ./data
+Inspect: delite status --data-dir ./data
 """
 
 import sys
@@ -312,8 +312,8 @@ if __name__ == "__main__":
     main()
 "#;
 
-const TS_AGENT_TEMPLATE: &str = r#"// Durable TypeScript SDK — coming soon.
-// Use Python today: durable init my-agent --lang python
+const TS_AGENT_TEMPLATE: &str = r#"// Delite TypeScript SDK — coming soon.
+// Use Python today: delite init my-agent --lang python
 console.log("TypeScript SDK coming soon.");
 "#;
 
@@ -358,14 +358,14 @@ fn cmd_status(args: &[String]) {
 // ---------------------------------------------------------------------------
 
 fn cmd_inspect(args: &[String]) {
-    let id_str = positional_arg(args, 0).unwrap_or_else(|| { eprintln!("Usage: durable inspect <id>"); std::process::exit(2); });
+    let id_str = positional_arg(args, 0).unwrap_or_else(|| { eprintln!("Usage: delite inspect <id>"); std::process::exit(2); });
     let dd = find_data_dir(args);
     let es = FileEventStore::new(&dd).unwrap_or_else(|e| { eprintln!("Error: {}", e); std::process::exit(1); });
     let exec_id = parse_exec_id(id_str);
     let events = es.events(exec_id).unwrap_or_default();
     if events.is_empty() { eprintln!("No events for {}", id_str); std::process::exit(1); }
 
-    let state = durable_runtime::storage::event::ExecutionState::from_events(exec_id, &events);
+    let state = delite_core::storage::event::ExecutionState::from_events(exec_id, &events);
 
     println!("\n  {}Execution:{} {}", C::bold(), C::reset(), id_str);
     println!("  {}", "─".repeat(58));
@@ -385,7 +385,7 @@ fn cmd_inspect(args: &[String]) {
 // ---------------------------------------------------------------------------
 
 fn cmd_steps(args: &[String]) {
-    let id_str = positional_arg(args, 0).unwrap_or_else(|| { eprintln!("Usage: durable steps <id>"); std::process::exit(2); });
+    let id_str = positional_arg(args, 0).unwrap_or_else(|| { eprintln!("Usage: delite steps <id>"); std::process::exit(2); });
     let dd = find_data_dir(args);
     let es = FileEventStore::new(&dd).unwrap_or_else(|e| { eprintln!("Error: {}", e); std::process::exit(1); });
     let events = es.events(parse_exec_id(id_str)).unwrap_or_default();
@@ -433,7 +433,7 @@ fn cmd_steps(args: &[String]) {
 // ---------------------------------------------------------------------------
 
 fn cmd_events(args: &[String]) {
-    let id_str = positional_arg(args, 0).unwrap_or_else(|| { eprintln!("Usage: durable events <id>"); std::process::exit(2); });
+    let id_str = positional_arg(args, 0).unwrap_or_else(|| { eprintln!("Usage: delite events <id>"); std::process::exit(2); });
     let dd = find_data_dir(args);
 
     if has_flag(args, "--json") {
@@ -452,7 +452,7 @@ fn cmd_events(args: &[String]) {
 // ---------------------------------------------------------------------------
 
 fn cmd_export(args: &[String]) {
-    let id_str = positional_arg(args, 0).unwrap_or_else(|| { eprintln!("Usage: durable export <id> [-o file]"); std::process::exit(2); });
+    let id_str = positional_arg(args, 0).unwrap_or_else(|| { eprintln!("Usage: delite export <id> [-o file]"); std::process::exit(2); });
     let dd = find_data_dir(args);
     let out_file = extract_flag(args, "-o");
     let es = FileEventStore::new(&dd).unwrap_or_else(|e| { eprintln!("Error: {}", e); std::process::exit(1); });

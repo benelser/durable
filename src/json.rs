@@ -111,7 +111,7 @@ impl Value {
 ///
 /// # Examples
 /// ```
-/// use durable_runtime::json;
+/// use delite_core::json;
 /// let v = json!({
 ///     "name": "Alice",
 ///     "age": 30,

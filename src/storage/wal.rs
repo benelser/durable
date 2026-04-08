@@ -418,7 +418,7 @@ mod tests {
     use super::*;
 
     fn temp_path(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("durable_wal_test_{}_{}", name, std::process::id()))
+        std::env::temp_dir().join(format!("delite_wal_test_{}_{}", name, std::process::id()))
     }
 
     #[test]

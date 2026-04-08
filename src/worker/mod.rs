@@ -107,7 +107,7 @@ impl Worker {
         let shutdown_timeout = self.config.shutdown_timeout;
 
         let handle = thread::Builder::new()
-            .name("durable-worker".to_string())
+            .name("delite-worker".to_string())
             .spawn(move || {
                 self.run_loop(&cancel_clone);
             })

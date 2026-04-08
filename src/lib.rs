@@ -26,18 +26,18 @@
 //! ## Quick Start
 //!
 //! ```rust,no_run
-//! use durable_runtime::*;
+//! use delite_core::*;
 //!
 //! fn main() -> Result<(), DurableError> {
 //!     // Ephemeral (in-memory) — great for testing
-//!     let agent = durable_runtime::agent_in_memory(
+//!     let agent = delite_core::agent_in_memory(
 //!         MockLlmClient::new(vec![LlmResponse::text("Hello!")])
 //!     );
 //!     let response = agent.run("Hi")?;
 //!     println!("{response}");
 //!
 //!     // Durable (file-backed) — survives crashes
-//!     // let agent = durable_runtime::agent("./my-agent", my_llm)?;
+//!     // let agent = delite_core::agent("./my-agent", my_llm)?;
 //!
 //!     Ok(())
 //! }
@@ -84,7 +84,7 @@ pub use core::types::ExecutionId;
 
 // =============================================================================
 // Level 2 API — power users access via module paths
-// e.g., durable_runtime::tool::ToolRegistry, durable_runtime::observe::ExecutionInspector
+// e.g., delite_core::tool::ToolRegistry, delite_core::observe::ExecutionInspector
 //
 // Re-export the most commonly needed Level 2 types for smoother migration.
 // =============================================================================
@@ -131,7 +131,7 @@ pub use json::{parse as parse_json, to_string as json_to_string, to_string_prett
 /// Both the execution log and event store are backed by the same directory.
 ///
 /// ```rust,ignore
-/// let agent = durable_runtime::agent("./my-agent", my_llm)?;
+/// let agent = delite_core::agent("./my-agent", my_llm)?;
 /// let response = agent.run("Hello")?;
 /// println!("{response}");
 /// ```
@@ -159,7 +159,7 @@ pub fn agent(
 /// Perfect for testing, prototyping, or stateless use cases.
 ///
 /// ```rust,ignore
-/// let agent = durable_runtime::agent_in_memory(my_llm);
+/// let agent = delite_core::agent_in_memory(my_llm);
 /// let response = agent.run("Hello")?;
 /// println!("{response}");
 /// ```

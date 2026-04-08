@@ -440,7 +440,7 @@ pub fn run_sdk_mode_with_auth(auth_token: Option<&str>) {
         let shutdown_flag = shutdown_flag.clone();
 
         std::thread::Builder::new()
-            .name("durable-event-loop".to_string())
+            .name("delite-event-loop".to_string())
             .spawn(move || {
                 while !shutdown_flag.load(std::sync::atomic::Ordering::SeqCst) {
                     std::thread::sleep(std::time::Duration::from_millis(200));

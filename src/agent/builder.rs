@@ -5,7 +5,7 @@
 //! An unconfigured runtime cannot be constructed.
 //!
 //! ```rust,ignore
-//! use durable_runtime::*;
+//! use delite_core::*;
 //!
 //! let runtime = AgentRuntime::builder()
 //!     .llm(MockLlmClient::new(vec![LlmResponse::Text("Hi!".into())]))
