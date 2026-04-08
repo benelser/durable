@@ -160,6 +160,7 @@ jobs:
       name: pypi
       url: https://pypi.org/project/delite-core
     permissions:
+      contents: read
       id-token: write
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
@@ -178,6 +179,7 @@ jobs:
     needs: [release]
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       id-token: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
@@ -207,7 +209,7 @@ jobs:
             unzip -o "artifacts/delite-core-aarch64-apple-darwin.zip" -d "npm-darwin-arm64/bin/"
           fi
           cat > "npm-darwin-arm64/package.json" << PKGJSON
-          {"name":"@bjelser/delite-darwin-arm64","version":"${VERSION}","os":["darwin"],"cpu":["arm64"],"bin":{"delite":"bin/delite"},"preferUnplugged":true}
+          {"name":"@bjelser/delite-darwin-arm64","version":"${VERSION}","os":["darwin"],"cpu":["arm64"],"bin":{"delite":"bin/delite"},"repository":{"type":"git","url":"https://github.com/benelser/durable"},"preferUnplugged":true}
           PKGJSON
           cd "npm-darwin-arm64" && npm publish --provenance --access public && cd ..
           mkdir -p npm-darwin-x64/bin
@@ -217,7 +219,7 @@ jobs:
             unzip -o "artifacts/delite-core-x86_64-apple-darwin.zip" -d "npm-darwin-x64/bin/"
           fi
           cat > "npm-darwin-x64/package.json" << PKGJSON
-          {"name":"@bjelser/delite-darwin-x64","version":"${VERSION}","os":["darwin"],"cpu":["x64"],"bin":{"delite":"bin/delite"},"preferUnplugged":true}
+          {"name":"@bjelser/delite-darwin-x64","version":"${VERSION}","os":["darwin"],"cpu":["x64"],"bin":{"delite":"bin/delite"},"repository":{"type":"git","url":"https://github.com/benelser/durable"},"preferUnplugged":true}
           PKGJSON
           cd "npm-darwin-x64" && npm publish --provenance --access public && cd ..
           mkdir -p npm-linux-arm64/bin
@@ -227,7 +229,7 @@ jobs:
             unzip -o "artifacts/delite-core-aarch64-unknown-linux-gnu.zip" -d "npm-linux-arm64/bin/"
           fi
           cat > "npm-linux-arm64/package.json" << PKGJSON
-          {"name":"@bjelser/delite-linux-arm64","version":"${VERSION}","os":["linux"],"cpu":["arm64"],"bin":{"delite":"bin/delite"},"preferUnplugged":true}
+          {"name":"@bjelser/delite-linux-arm64","version":"${VERSION}","os":["linux"],"cpu":["arm64"],"bin":{"delite":"bin/delite"},"repository":{"type":"git","url":"https://github.com/benelser/durable"},"preferUnplugged":true}
           PKGJSON
           cd "npm-linux-arm64" && npm publish --provenance --access public && cd ..
           mkdir -p npm-linux-x64/bin
@@ -237,7 +239,7 @@ jobs:
             unzip -o "artifacts/delite-core-x86_64-unknown-linux-gnu.zip" -d "npm-linux-x64/bin/"
           fi
           cat > "npm-linux-x64/package.json" << PKGJSON
-          {"name":"@bjelser/delite-linux-x64","version":"${VERSION}","os":["linux"],"cpu":["x64"],"bin":{"delite":"bin/delite"},"preferUnplugged":true}
+          {"name":"@bjelser/delite-linux-x64","version":"${VERSION}","os":["linux"],"cpu":["x64"],"bin":{"delite":"bin/delite"},"repository":{"type":"git","url":"https://github.com/benelser/durable"},"preferUnplugged":true}
           PKGJSON
           cd "npm-linux-x64" && npm publish --provenance --access public && cd ..
           mkdir -p npm-linux-x64/bin
@@ -247,7 +249,7 @@ jobs:
             unzip -o "artifacts/delite-core-x86_64-unknown-linux-musl.zip" -d "npm-linux-x64/bin/"
           fi
           cat > "npm-linux-x64/package.json" << PKGJSON
-          {"name":"@bjelser/delite-linux-x64","version":"${VERSION}","os":["linux"],"cpu":["x64"],"bin":{"delite":"bin/delite"},"preferUnplugged":true}
+          {"name":"@bjelser/delite-linux-x64","version":"${VERSION}","os":["linux"],"cpu":["x64"],"bin":{"delite":"bin/delite"},"repository":{"type":"git","url":"https://github.com/benelser/durable"},"preferUnplugged":true}
           PKGJSON
           cd "npm-linux-x64" && npm publish --provenance --access public && cd ..
           mkdir -p npm-win32-x64/bin
@@ -257,7 +259,7 @@ jobs:
             unzip -o "artifacts/delite-core-x86_64-pc-windows-msvc.zip" -d "npm-win32-x64/bin/"
           fi
           cat > "npm-win32-x64/package.json" << PKGJSON
-          {"name":"@bjelser/delite-win32-x64","version":"${VERSION}","os":["win32"],"cpu":["x64"],"bin":{"delite":"bin/delite.exe"},"preferUnplugged":true}
+          {"name":"@bjelser/delite-win32-x64","version":"${VERSION}","os":["win32"],"cpu":["x64"],"bin":{"delite":"bin/delite.exe"},"repository":{"type":"git","url":"https://github.com/benelser/durable"},"preferUnplugged":true}
           PKGJSON
           cd "npm-win32-x64" && npm publish --provenance --access public && cd ..
 
