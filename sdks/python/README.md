@@ -1,6 +1,6 @@
 # durable-runtime
 
-The SQLite of durable agent execution. Zero dependencies. Crash-recoverable. Exactly-once semantics.
+The sqlite of durable agent execution. Zero dependencies. Crash-recoverable. Exactly-once semantics.
 
 ```python
 from durable import Agent, tool

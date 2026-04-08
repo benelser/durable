@@ -1,4 +1,4 @@
-//! delite — the SQLite of durable agent execution.
+//! delite — the sqlite of durable agent execution.
 //!
 //! One binary. Every feature. Every language.
 
@@ -168,7 +168,7 @@ fn cmd_help(args: &[String]) {
         return;
     }
 
-    println!("\n{}delite{} — the SQLite of durable agent execution\n", C::bold(), C::reset());
+    println!("\n{}delite{} — the sqlite of durable agent execution\n", C::bold(), C::reset());
     println!("{}Getting started:{}",       C::bold(), C::reset());
     println!("  delite init <name> [--lang python|typescript]\n");
     println!("{}Runtime:{}",               C::bold(), C::reset());

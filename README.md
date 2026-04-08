@@ -1,6 +1,6 @@
 # delite
 
-The SQLite of durable agent execution. Crash-recoverable AI agents with exactly-once semantics.
+The sqlite of durable agent execution. Crash-recoverable AI agents with exactly-once semantics.
 
 ## Install
 
@@ -201,7 +201,7 @@ delite health --data-dir ./data                    # storage health
 
 ### vs LangGraph
 
-LangGraph has checkpointing (save/restore graph state via SQLite, Postgres, etc). This gives you conversation resume and human-in-the-loop interrupts.
+LangGraph has checkpointing (save/restore graph state via sqlite, Postgres, etc). This gives you conversation resume and human-in-the-loop interrupts.
 
 What it does NOT give you: **exactly-once tool execution.** LangGraph checkpoints at node boundaries, not within nodes. If a tool executes and the process crashes before the next checkpoint, the tool re-executes on resume.
 

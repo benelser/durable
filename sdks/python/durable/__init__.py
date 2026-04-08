@@ -1,4 +1,4 @@
-"""Durable — the SQLite of durable agent execution.
+"""Durable — the sqlite of durable agent execution.
 
 A Python SDK for the durable runtime. Zero dependencies. Crash-recoverable.
 Exactly-once execution. First-class tools, hooks, contracts, and budgets.

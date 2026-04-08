@@ -10,7 +10,7 @@ dies mid-execution, work is lost. They all solve it differently:
 | Framework | State Persistence | Crash Recovery |
 |-----------|------------------|----------------|
 | LangGraph | Checkpointers (pluggable) | Replay from checkpoint |
-| CrewAI | Memory system (Chroma + SQLite) | None — restart from scratch |
+| CrewAI | Memory system (Chroma + sqlite) | None — restart from scratch |
 | Google ADK | Session state (managed) | Partial — session survives, steps don't |
 | **delite** | Event-sourced log | Full — replay any execution, exactly-once |
 

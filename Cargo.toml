@@ -2,7 +2,7 @@
 name = "delite-core"
 version = "0.2.4"
 edition = "2021"
-description = "The SQLite of durable agent execution — crash-recoverable AI agents with exactly-once semantics. Zero dependencies."
+description = "The sqlite of durable agent execution — crash-recoverable AI agents with exactly-once semantics. Zero dependencies."
 license = "MIT"
 readme = "README.md"
 keywords = ["agent", "durable", "llm", "execution", "replay"]
